@@ -82,10 +82,19 @@ function initDatabase() {
       notified INTEGER NOT NULL DEFAULT 0
     );
 
+    CREATE TABLE IF NOT EXISTS trade_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      type TEXT NOT NULL,
+      message TEXT NOT NULL,
+      data TEXT,
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+
     CREATE INDEX IF NOT EXISTS idx_price_records_item_time ON price_records(item_id, recorded_at DESC);
     CREATE INDEX IF NOT EXISTS idx_portfolio_status ON portfolio(status);
     CREATE INDEX IF NOT EXISTS idx_items_goods_id ON items(goods_id);
     CREATE INDEX IF NOT EXISTS idx_alert_logs_triggered ON alert_logs(triggered_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_trade_logs_time ON trade_logs(created_at DESC);
   `);
 
   console.log('SQLite database initialized at:', dbPath);

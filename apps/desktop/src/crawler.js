@@ -1,86 +1,12 @@
 const { getDb } = require('./database');
 const { Notification } = require('electron');
-
-const BUFF_BASE_URL = 'https://buff.163.com';
-const BUFF_FEE_RATE = 0.025;
+const { buffAPI, BUFF_FEE_RATE } = require('./buff-api');
 
 let crawlerPaused = false;
 let crawlerInterval = null;
 let watchlistInterval = null;
 let fullScanInterval = null;
-
-class BuffClient {
-  constructor() {
-    this.cookie = '';
-    this.lastRequestTime = 0;
-    this.minInterval = 3000;
-  }
-
-  setCookie(cookie) {
-    this.cookie = cookie;
-  }
-
-  async request(url, retries = 3) {
-    const now = Date.now();
-    const elapsed = now - this.lastRequestTime;
-    if (elapsed < this.minInterval) {
-      await new Promise((r) => setTimeout(r, this.minInterval - elapsed));
-    }
-    this.lastRequestTime = Date.now();
-
-    for (let attempt = 1; attempt <= retries; attempt++) {
-      try {
-        const response = await fetch(url, {
-          headers: {
-            Cookie: this.cookie,
-            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
-            Referer: BUFF_BASE_URL,
-            Accept: 'application/json',
-          },
-        });
-
-        if (response.status === 429) {
-          const backoff = Math.pow(2, attempt) * 5000;
-          console.warn(`Rate limited, backing off ${backoff}ms`);
-          await new Promise((r) => setTimeout(r, backoff));
-          continue;
-        }
-
-        if (response.status === 403) {
-          throw new Error('BUFF_AUTH_EXPIRED');
-        }
-
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}`);
-        }
-
-        const json = await response.json();
-        if (json.code !== 'OK') {
-          throw new Error(`BUFF API: ${json.code} - ${json.msg}`);
-        }
-
-        return json.data;
-      } catch (err) {
-        if (attempt === retries || err.message === 'BUFF_AUTH_EXPIRED') throw err;
-        await new Promise((r) => setTimeout(r, Math.pow(2, attempt) * 1000));
-      }
-    }
-  }
-
-  async getMarketGoods(game = 'csgo', page = 1) {
-    return this.request(`${BUFF_BASE_URL}/api/market/goods?game=${game}&page_num=${page}&page_size=80`);
-  }
-
-  async getSellOrders(goodsId) {
-    return this.request(`${BUFF_BASE_URL}/api/market/goods/sell_order?goods_id=${goodsId}&page_num=1`);
-  }
-
-  async getPriceHistory(goodsId, days = 30) {
-    return this.request(`${BUFF_BASE_URL}/api/market/goods/price_history?goods_id=${goodsId}&days=${days}`);
-  }
-}
-
-const buffClient = new BuffClient();
+let cookieCheckInterval = null;
 
 async function crawlItemPrice(goodsId) {
   if (crawlerPaused) return;
@@ -90,7 +16,7 @@ async function crawlItemPrice(goodsId) {
   if (!item) return;
 
   try {
-    const data = await buffClient.getSellOrders(goodsId);
+    const data = await buffAPI.getSellOrders(goodsId);
     if (!data.items || data.items.length === 0) return;
 
     const prices = data.items.map((o) => parseFloat(o.price));
@@ -119,7 +45,7 @@ async function crawlMarketPage(game = 'csgo', page = 1) {
   if (crawlerPaused) return;
 
   try {
-    const data = await buffClient.getMarketGoods(game, page);
+    const data = await buffAPI.getMarketGoods(game, page);
     const db = getDb();
 
     const upsert = db.prepare(`
@@ -179,15 +105,32 @@ async function crawlWatchlistItems() {
   }
 }
 
+async function checkCookieValidity() {
+  try {
+    const result = await buffAPI.checkSession();
+    if (!result.valid) {
+      console.warn('[Crawler] Cookie expired!');
+      new Notification({ title: 'BUFF Monitor', body: 'Cookie已失效，请及时更新！' }).show();
+      pauseCrawler();
+      return false;
+    }
+    return true;
+  } catch {
+    return true;
+  }
+}
+
 function startCrawler(cookie) {
-  buffClient.setCookie(cookie);
+  buffAPI.setCookie(cookie);
   crawlerPaused = false;
 
   crawlerInterval = setInterval(crawlPortfolioItems, 30 * 60 * 1000);
   watchlistInterval = setInterval(crawlWatchlistItems, 2 * 60 * 60 * 1000);
   fullScanInterval = setInterval(() => crawlMarketPage('csgo', 1), 24 * 60 * 60 * 1000);
+  cookieCheckInterval = setInterval(checkCookieValidity, 30 * 60 * 1000);
 
   setTimeout(crawlPortfolioItems, 5000);
+  setTimeout(checkCookieValidity, 10000);
   console.log('[Crawler] Started');
 }
 
@@ -195,6 +138,7 @@ function stopCrawler() {
   if (crawlerInterval) clearInterval(crawlerInterval);
   if (watchlistInterval) clearInterval(watchlistInterval);
   if (fullScanInterval) clearInterval(fullScanInterval);
+  if (cookieCheckInterval) clearInterval(cookieCheckInterval);
   crawlerPaused = true;
   console.log('[Crawler] Stopped');
 }
@@ -208,7 +152,7 @@ function resumeCrawler() {
 }
 
 function updateCookie(cookie) {
-  buffClient.setCookie(cookie);
+  buffAPI.setCookie(cookie);
 }
 
 module.exports = {

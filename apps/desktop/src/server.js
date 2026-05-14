@@ -6,6 +6,9 @@ const { getDb } = require('./database');
 const { analyzeItem } = require('./analysis');
 const { startCrawler, stopCrawler, pauseCrawler, resumeCrawler, updateCookie, crawlMarketPage, crawlItemPrice } = require('./crawler');
 const { sendWeChatNotification, sendNativeNotification, formatSignalMessage, setPushPlusToken } = require('./notification');
+const { buffAPI } = require('./buff-api');
+const { pricingEngine } = require('./pricing');
+const { autoTrader } = require('./auto-trader');
 const Store = require('electron-store');
 
 const store = new Store();
@@ -225,6 +228,139 @@ function startServer() {
     app.post('/api/scheduler/pause', (_req, res) => { pauseCrawler(); res.json({ paused: true }); });
     app.post('/api/scheduler/resume', (_req, res) => { resumeCrawler(); res.json({ paused: false }); });
 
+    // ============= Trading API =============
+
+    // BUFF account info
+    app.get('/api/trading/account', async (_req, res) => {
+      try {
+        const [userInfo, balance] = await Promise.all([buffAPI.getUserInfo(), buffAPI.getBalance()]);
+        res.json({ userInfo, balance });
+      } catch (err) {
+        res.status(err.message === 'BUFF_AUTH_EXPIRED' ? 401 : 500).json({ error: err.message });
+      }
+    });
+
+    app.get('/api/trading/session-check', async (_req, res) => {
+      const result = await buffAPI.checkSession();
+      res.json(result);
+    });
+
+    // Search BUFF market
+    app.get('/api/trading/search', async (req, res) => {
+      try {
+        const { keyword, game = 'csgo' } = req.query;
+        if (!keyword) return res.status(400).json({ error: 'keyword required' });
+        const data = await buffAPI.searchGoods(keyword, game);
+        res.json(data);
+      } catch (err) { res.status(500).json({ error: err.message }); }
+    });
+
+    // Get pricing analysis for an item
+    app.get('/api/trading/pricing/:goodsId', async (req, res) => {
+      try {
+        const market = await pricingEngine.getMarketFairPrice(req.params.goodsId);
+        if (!market) return res.status(404).json({ error: 'No data' });
+        const buyAdvice = pricingEngine.calculateBuyPrice(market.fairPrice);
+        res.json({ market, buyAdvice });
+      } catch (err) { res.status(500).json({ error: err.message }); }
+    });
+
+    // Get sell pricing suggestion for portfolio item
+    app.get('/api/trading/sell-advice/:portfolioId', async (req, res) => {
+      try {
+        const db = getDb();
+        const h = db.prepare(`
+          SELECT p.*, i.goods_id, i.name FROM portfolio p JOIN items i ON i.id = p.item_id WHERE p.id = ?
+        `).get(req.params.portfolioId);
+        if (!h) return res.status(404).json({ error: 'Not found' });
+        const market = await pricingEngine.getMarketFairPrice(h.goods_id);
+        if (!market) return res.status(404).json({ error: 'No market data' });
+        const sellAdvice = pricingEngine.calculateSellPrice(market.fairPrice, h.buy_price, h.quantity);
+        const stopLoss = pricingEngine.evaluateStopLoss(market.fairPrice, h.buy_price);
+        res.json({ holding: h, market, sellAdvice, stopLoss });
+      } catch (err) { res.status(500).json({ error: err.message }); }
+    });
+
+    // Portfolio pricing analysis
+    app.get('/api/trading/portfolio-analysis', async (_req, res) => {
+      try {
+        const results = await pricingEngine.analyzePortfolioPricing();
+        res.json(results);
+      } catch (err) { res.status(500).json({ error: err.message }); }
+    });
+
+    // Manual buy
+    app.post('/api/trading/buy', async (req, res) => {
+      try {
+        const { goodsId, maxPrice } = req.body;
+        const result = await autoTrader.manualBuy(goodsId, maxPrice);
+        res.json(result);
+      } catch (err) { res.status(500).json({ error: err.message }); }
+    });
+
+    // Manual sell/list
+    app.post('/api/trading/sell', async (req, res) => {
+      try {
+        const { goodsId, price } = req.body;
+        const result = await autoTrader.manualSell(goodsId, price);
+        res.json(result);
+      } catch (err) { res.status(500).json({ error: err.message }); }
+    });
+
+    // My on-sale items
+    app.get('/api/trading/on-sale', async (_req, res) => {
+      try {
+        const data = await buffAPI.getMyOnSale();
+        res.json(data);
+      } catch (err) { res.status(500).json({ error: err.message }); }
+    });
+
+    // Trade history
+    app.get('/api/trading/history', (_req, res) => {
+      const db = getDb();
+      const logs = db.prepare('SELECT * FROM trade_logs ORDER BY created_at DESC LIMIT 100').all();
+      res.json(logs);
+    });
+
+    // Auto-trader status & control
+    app.get('/api/trading/auto-status', (_req, res) => {
+      res.json(autoTrader.getStatus());
+    });
+
+    app.post('/api/trading/auto-config', (req, res) => {
+      autoTrader.updateConfig(req.body);
+      store.set('autoTraderConfig', autoTrader.config);
+      res.json({ success: true, config: autoTrader.config });
+    });
+
+    app.post('/api/trading/auto-start', (_req, res) => {
+      autoTrader.start();
+      res.json({ enabled: true });
+    });
+
+    app.post('/api/trading/auto-stop', (_req, res) => {
+      autoTrader.stop();
+      res.json({ enabled: false });
+    });
+
+    app.post('/api/trading/auto-run', async (_req, res) => {
+      try {
+        await autoTrader.runCycle();
+        res.json({ success: true });
+      } catch (err) { res.status(500).json({ error: err.message }); }
+    });
+
+    // Pricing config
+    app.get('/api/trading/pricing-config', (_req, res) => {
+      res.json(pricingEngine.config);
+    });
+
+    app.post('/api/trading/pricing-config', (req, res) => {
+      pricingEngine.updateConfig(req.body);
+      store.set('pricingConfig', pricingEngine.config);
+      res.json({ success: true, config: pricingEngine.config });
+    });
+
     // Config
     app.get('/api/config/:key', (req, res) => {
       res.json({ value: store.get(req.params.key) });
@@ -256,6 +392,11 @@ function startServer() {
       const token = store.get('pushplus_token');
       if (cookie) startCrawler(cookie);
       if (token) setPushPlusToken(token);
+
+      const savedPricingConfig = store.get('pricingConfig');
+      if (savedPricingConfig) pricingEngine.updateConfig(savedPricingConfig);
+      const savedTraderConfig = store.get('autoTraderConfig');
+      if (savedTraderConfig) autoTrader.updateConfig(savedTraderConfig);
 
       resolve(port);
     });
@@ -386,6 +527,9 @@ body{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","SF Pro Text"
 <div class="nav-item" data-tab="portfolio">
 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
 持仓管理</div>
+<div class="nav-item" data-tab="trading">
+<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20V10"/><path d="M18 20V4"/><path d="M6 20v-4"/></svg>
+交易</div>
 <div class="nav-section">系统</div>
 <div class="nav-item" data-tab="settings">
 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06A1.65 1.65 0 009 4.6a1.65 1.65 0 001-1.51V3a2 2 0 114 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
@@ -514,6 +658,72 @@ async function render(){
           </div>
         </div>\`;
     }
+    else if(currentTab==='trading'){
+      const [status, history]=await Promise.all([
+        fetch(API+'/trading/auto-status').then(r=>r.json()),
+        fetch(API+'/trading/history').then(r=>r.json()),
+      ]);
+      c.innerHTML=\`
+        <div class="page-title">交易中心</div>
+        <div class="stats-grid">
+          <div class="stat-card">
+            <div class="stat-label">自动交易</div>
+            <div class="stat-value" style="color:\${status.enabled?'var(--green)':'var(--text-muted)'}">\${status.enabled?'运行中':'已停止'}</div>
+            <div class="stat-sub">\${status.config.dryRun?'模拟模式（不实际交易）':'实盘模式'}</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">今日交易</div>
+            <div class="stat-value">\${status.todayCount}</div>
+            <div class="stat-sub">上限 \${status.config.maxDailyTrades} 笔/天</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">单笔上限</div>
+            <div class="stat-value">¥\${status.config.maxBuyAmount}</div>
+            <div class="stat-sub">最大自动买入金额</div>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="panel-header">
+            <span class="panel-title">自动交易控制</span>
+            <button class="btn \${status.enabled?'btn-ghost':'btn-primary'}" onclick="toggleAutoTrader(\${!status.enabled})">\${status.enabled?'停止':'启动'}</button>
+          </div>
+          <div style="padding:22px">
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+              <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+                <input type="checkbox" id="cfg-dryRun" \${status.config.dryRun?'checked':''} onchange="updateTraderConfig()">
+                <span style="font-size:13px">模拟模式（仅发通知不下单）</span>
+              </label>
+              <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+                <input type="checkbox" id="cfg-autoBuy" \${status.config.autoBuy?'checked':''} onchange="updateTraderConfig()">
+                <span style="font-size:13px">自动买入（信号触发）</span>
+              </label>
+              <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+                <input type="checkbox" id="cfg-autoSell" \${status.config.autoSell?'checked':''} onchange="updateTraderConfig()">
+                <span style="font-size:13px">自动卖出（止盈/止损）</span>
+              </label>
+              <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+                <input type="checkbox" id="cfg-autoReprice" \${status.config.autoReprice?'checked':''} onchange="updateTraderConfig()">
+                <span style="font-size:13px">自动改价（跟踪最低价）</span>
+              </label>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-top:16px">
+              <div class="form-group"><label class="form-label">最大买入金额</label><input class="form-input" id="cfg-maxBuy" type="number" value="\${status.config.maxBuyAmount}" onchange="updateTraderConfig()"></div>
+              <div class="form-group"><label class="form-label">每日交易上限</label><input class="form-input" id="cfg-maxDaily" type="number" value="\${status.config.maxDailyTrades}" onchange="updateTraderConfig()"></div>
+              <div class="form-group"><label class="form-label">冷却时间(分钟)</label><input class="form-input" id="cfg-cooldown" type="number" value="\${status.config.cooldownMinutes}" onchange="updateTraderConfig()"></div>
+            </div>
+            <button class="btn btn-ghost" style="margin-top:12px" onclick="runCycleNow()">立即执行一轮检查</button>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="panel-header"><span class="panel-title">交易日志</span><span class="panel-badge">\${history.length}</span></div>
+          <div class="panel-body">
+            \${history.length?history.slice(0,20).map(l=>{
+              const icon=l.type.includes('buy')?'var(--green)':l.type.includes('stop_loss')?'var(--red)':'var(--yellow)';
+              return \`<div class="list-item"><div class="list-item-left"><div class="list-item-dot" style="background:\${icon}"></div><div><div class="list-item-name">\${l.message}</div><div class="list-item-meta">\${l.type}</div></div></div><div class="list-item-time">\${new Date(l.created_at).toLocaleString('zh-CN',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})}</div></div>\`;
+            }).join(''):'<div class="panel-empty"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 20V10"/><path d="M18 20V4"/><path d="M6 20v-4"/></svg><div>暂无交易记录</div></div>'}
+          </div>
+        </div>\`;
+    }
     else if(currentTab==='settings'){
       const cookie=await fetch(API+'/config/buff_cookie').then(r=>r.json());
       const token=await fetch(API+'/config/pushplus_token').then(r=>r.json());
@@ -566,6 +776,31 @@ async function testConfig(){
     if(r.ok)showToast('连接正常');
     else showToast('连接异常');
   }catch(e){showToast('连接失败: '+e.message);}
+}
+
+async function toggleAutoTrader(enable){
+  await fetch(API+'/trading/auto-'+(enable?'start':'stop'),{method:'POST'});
+  showToast(enable?'自动交易已启动':'自动交易已停止');
+  render();
+}
+async function updateTraderConfig(){
+  const cfg={
+    dryRun:document.getElementById('cfg-dryRun')?.checked??true,
+    autoBuy:document.getElementById('cfg-autoBuy')?.checked??false,
+    autoSell:document.getElementById('cfg-autoSell')?.checked??false,
+    autoReprice:document.getElementById('cfg-autoReprice')?.checked??false,
+    maxBuyAmount:parseFloat(document.getElementById('cfg-maxBuy')?.value)||200,
+    maxDailyTrades:parseInt(document.getElementById('cfg-maxDaily')?.value)||10,
+    cooldownMinutes:parseInt(document.getElementById('cfg-cooldown')?.value)||60,
+  };
+  await fetch(API+'/trading/auto-config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(cfg)});
+  showToast('配置已更新');
+}
+async function runCycleNow(){
+  showToast('正在执行...');
+  await fetch(API+'/trading/auto-run',{method:'POST'});
+  showToast('检查完成');
+  render();
 }
 
 render();
