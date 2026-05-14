@@ -1,5 +1,11 @@
-const { app, BrowserWindow, Tray, Menu, nativeImage, Notification, ipcMain, shell } = require('electron');
 const path = require('path');
+
+// 确保在打包环境中能找到所有依赖
+const appRoot = path.join(__dirname, '..');
+const prodModulesPath = path.join(appRoot, 'node_modules_prod', 'node_modules');
+require('module').globalPaths.unshift(prodModulesPath);
+
+const { app, BrowserWindow, Tray, Menu, nativeImage, Notification, ipcMain, shell } = require('electron');
 const { spawn } = require('child_process');
 const { startServer, stopServer } = require('./server');
 const { initDatabase } = require('./database');

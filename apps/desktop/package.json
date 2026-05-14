@@ -2,10 +2,13 @@
   "name": "@buff-monitor/desktop",
   "version": "1.0.0",
   "private": true,
+  "description": "BUFF饰品价格监控系统 Mac桌面版",
+  "author": "bobipoppy",
   "main": "src/main.js",
   "scripts": {
     "postinstall": "npx --package=@electron/rebuild@3.6.0 -- electron-rebuild -f -w better-sqlite3",
     "dev": "electron .",
+    "prebuild": "cd node_modules_prod && npm install --omit=dev",
     "build": "electron-builder",
     "build:mac": "electron-builder --mac"
   },
@@ -32,15 +35,14 @@
       "target": [
         {
           "target": "dmg",
-          "arch": [
-            "arm64"
-          ]
+          "arch": ["arm64"]
         }
       ]
     },
     "files": [
       "src/**/*",
-      "assets/**/*"
+      "assets/**/*",
+      "node_modules_prod/node_modules/**/*"
     ],
     "extraResources": [
       {
@@ -52,6 +54,7 @@
         "to": "nextjs/apps/web/.next/static"
       }
     ],
-    "asar": false
+    "asar": false,
+    "npmRebuild": true
   }
 }
