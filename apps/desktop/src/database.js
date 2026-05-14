@@ -27,7 +27,7 @@ function initDatabase() {
       steam_price REAL,
       buff_min_price REAL NOT NULL DEFAULT 0,
       sell_count INTEGER NOT NULL DEFAULT 0,
-      watch_priority TEXT NOT NULL DEFAULT 'normal',
+      watch_priority TEXT NOT NULL DEFAULT 'none',
       created_at TEXT DEFAULT (datetime('now')),
       updated_at TEXT DEFAULT (datetime('now'))
     );
@@ -93,6 +93,8 @@ function initDatabase() {
     CREATE INDEX IF NOT EXISTS idx_price_records_item_time ON price_records(item_id, recorded_at DESC);
     CREATE INDEX IF NOT EXISTS idx_portfolio_status ON portfolio(status);
     CREATE INDEX IF NOT EXISTS idx_items_goods_id ON items(goods_id);
+    CREATE INDEX IF NOT EXISTS idx_items_category ON items(category);
+    CREATE INDEX IF NOT EXISTS idx_items_priority ON items(watch_priority);
     CREATE INDEX IF NOT EXISTS idx_alert_logs_triggered ON alert_logs(triggered_at DESC);
     CREATE INDEX IF NOT EXISTS idx_trade_logs_time ON trade_logs(created_at DESC);
   `);

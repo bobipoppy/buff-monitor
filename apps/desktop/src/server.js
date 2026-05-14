@@ -4,7 +4,7 @@ const path = require('path');
 const { app: electronApp } = require('electron');
 const { getDb } = require('./database');
 const { analyzeItem } = require('./analysis');
-const { startCrawler, stopCrawler, pauseCrawler, resumeCrawler, updateCookie, crawlMarketPage, crawlItemPrice } = require('./crawler');
+const { startCrawler, stopCrawler, pauseCrawler, resumeCrawler, updateCookie, crawlMarketPage, crawlItemPrice, fullMarketScan, getScanStatus, categorizeItem } = require('./crawler');
 const { sendWeChatNotification, sendNativeNotification, formatSignalMessage, setPushPlusToken } = require('./notification');
 const { buffAPI } = require('./buff-api');
 const { pricingEngine } = require('./pricing');
@@ -50,17 +50,19 @@ function startServer() {
     app.get('/api/items', (req, res) => {
       try {
         const db = getDb();
-        const { search, game, page = '1', limit = '50' } = req.query;
+        const { search, game, category, priority, page = '1', limit = '50' } = req.query;
         const offset = (parseInt(page) - 1) * parseInt(limit);
         let sql = `SELECT * FROM items WHERE 1=1`;
         const params = [];
         if (game) { sql += ` AND game = ?`; params.push(game); }
+        if (category) { sql += ` AND category = ?`; params.push(category); }
+        if (priority) { sql += ` AND watch_priority = ?`; params.push(priority); }
         if (search) { sql += ` AND name LIKE ?`; params.push(`%${search}%`); }
 
         const countSql = sql.replace('SELECT *', 'SELECT COUNT(*) as count');
         const total = db.prepare(countSql).get(...params).count;
 
-        sql += ` ORDER BY updated_at DESC LIMIT ? OFFSET ?`;
+        sql += ` ORDER BY buff_min_price DESC LIMIT ? OFFSET ?`;
         params.push(parseInt(limit), offset);
         const items = db.prepare(sql).all(...params);
 
@@ -68,6 +70,46 @@ function startServer() {
       } catch (err) {
         res.status(500).json({ error: err.message });
       }
+    });
+
+    app.post('/api/items/scan', async (req, res) => {
+      const { game = 'csgo', pages, full } = req.body;
+      if (full) {
+        fullMarketScan(game);
+        res.json({ message: 'Full market scan started' });
+      } else {
+        const p = pages || 5;
+        for (let i = 1; i <= p; i++) { crawlMarketPage(game, i); }
+        res.json({ message: `Scan started: ${game}, ${p} pages` });
+      }
+    });
+
+    app.get('/api/items/scan-status', (_req, res) => {
+      res.json(getScanStatus());
+    });
+
+    app.get('/api/items/categories', (_req, res) => {
+      const db = getDb();
+      const cats = db.prepare(`SELECT category, COUNT(*) as count FROM items GROUP BY category ORDER BY count DESC`).all();
+      res.json(cats);
+    });
+
+    app.post('/api/items/batch-watch', (req, res) => {
+      const db = getDb();
+      const { ids, priority } = req.body;
+      if (!ids?.length || !priority) return res.status(400).json({ error: 'ids and priority required' });
+      const stmt = db.prepare('UPDATE items SET watch_priority = ?, updated_at = datetime(\'now\') WHERE id = ?');
+      db.transaction(() => { for (const id of ids) stmt.run(priority, id); })();
+      res.json({ updated: ids.length });
+    });
+
+    app.post('/api/items/batch-unwatch', (req, res) => {
+      const db = getDb();
+      const { ids } = req.body;
+      if (!ids?.length) return res.status(400).json({ error: 'ids required' });
+      const stmt = db.prepare('UPDATE items SET watch_priority = \'none\', updated_at = datetime(\'now\') WHERE id = ?');
+      db.transaction(() => { for (const id of ids) stmt.run(id); })();
+      res.json({ updated: ids.length });
     });
 
     app.get('/api/items/:id', (req, res) => {
@@ -116,14 +158,6 @@ function startServer() {
       const db = getDb();
       db.prepare('DELETE FROM items WHERE id = ?').run(req.params.id);
       res.json({ deleted: true });
-    });
-
-    app.post('/api/items/scan', async (req, res) => {
-      const { game = 'csgo', pages = 5 } = req.body;
-      for (let i = 1; i <= pages; i++) {
-        crawlMarketPage(game, i);
-      }
-      res.json({ message: `Scan started: ${game}, ${pages} pages` });
     });
 
     // Portfolio
@@ -418,6 +452,16 @@ function startServer() {
       const savedTraderConfig = store.get('autoTraderConfig');
       if (savedTraderConfig) autoTrader.updateConfig(savedTraderConfig);
 
+      try {
+        const db = getDb();
+        const uncategorized = db.prepare(`SELECT id, name FROM items WHERE category IS NULL OR category = ''`).all();
+        if (uncategorized.length) {
+          const stmt = db.prepare('UPDATE items SET category = ? WHERE id = ?');
+          db.transaction(() => { for (const item of uncategorized) stmt.run(categorizeItem(item.name), item.id); })();
+          console.log(`[Server] Categorized ${uncategorized.length} items`);
+        }
+      } catch (e) { console.error('[Server] Category migration error:', e.message); }
+
       resolve(port);
     });
 
@@ -620,22 +664,142 @@ async function render(){
         </div>\`;
     }
     else if(currentTab==='items'){
-      const r=await fetch(API+'/items').then(r=>r.json());
+      const cats=await fetch(API+'/items/categories').then(r=>r.json());
+      const scanSt=await fetch(API+'/items/scan-status').then(r=>r.json());
+      const catLabels={rifle:'步枪',pistol:'手枪',sniper:'狙击枪',smg:'微冲',shotgun:'霰弹枪',machinegun:'机枪',knife:'刀',gloves:'手套',sticker:'贴纸',patch:'布章',music_kit:'音乐盒',graffiti:'涂鸦',case:'箱子/胶囊',key:'钥匙',agent:'特工',collectible:'收藏品',other:'其他'};
+
       c.innerHTML=\`
-        <div class="page-title">监控列表 <span class="badge">\${r.total} 项</span></div>
-        \${r.items.length?\`<div class="panel"><div class="panel-body">\${r.items.map(i=>\`
-          <div class="list-item">
-            <div class="list-item-left">
-              <div class="list-item-dot \${i.watch_priority}"></div>
-              <div><div class="list-item-name">\${i.name}</div><div class="list-item-meta">\${i.game} · \${i.watch_priority==='high'?'高优先':'普通'}</div></div>
-            </div>
-            <div class="list-item-right"><div class="list-item-price">¥\${i.buff_min_price||'--'}</div></div>
-          </div>\`).join('')}</div></div>\`:\`
-        <div class="welcome">
-          <div class="welcome-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg></div>
-          <h2>开始监控</h2>
-          <p>前往「设置」配置你的 BUFF Cookie，然后添加想要监控的饰品。系统会自动追踪价格变化并发送通知。</p>
-        </div>\`}\`;
+        <div class="page-title">监控列表 <span class="badge" id="items-total">加载中...</span></div>
+        <div class="items-toolbar" style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap;align-items:center">
+          <input id="items-search" type="text" placeholder="搜索商品名称..." style="flex:1;min-width:180px;padding:8px 12px;border:1px solid var(--border);border-radius:8px;background:var(--card);color:var(--text);font-size:13px"/>
+          <select id="items-cat" style="padding:8px 12px;border:1px solid var(--border);border-radius:8px;background:var(--card);color:var(--text);font-size:13px">
+            <option value="">全部分类</option>
+            \${cats.map(ct=>\`<option value="\${ct.category}">\${catLabels[ct.category]||ct.category} (\${ct.count})</option>\`).join('')}
+          </select>
+          <select id="items-priority" style="padding:8px 12px;border:1px solid var(--border);border-radius:8px;background:var(--card);color:var(--text);font-size:13px">
+            <option value="">全部状态</option>
+            <option value="high">高优先监控</option>
+            <option value="normal">普通监控</option>
+            <option value="none">未监控</option>
+          </select>
+          <button onclick="startFullScan()" style="padding:8px 16px;border-radius:8px;border:none;background:var(--accent);color:#fff;cursor:pointer;font-size:13px;white-space:nowrap">\${scanSt.running?'扫描中...':'全量扫描'}</button>
+        </div>
+
+        <div class="batch-bar" id="batch-bar" style="display:none;padding:10px 16px;background:var(--accent);color:#fff;border-radius:8px;margin-bottom:12px;align-items:center;gap:8px;flex-wrap:wrap">
+          <span>已选 <strong id="sel-count">0</strong> 项</span>
+          <button onclick="batchWatch('high')" style="padding:4px 12px;border-radius:6px;border:1px solid rgba(255,255,255,.4);background:transparent;color:#fff;cursor:pointer;font-size:12px">设为高优先</button>
+          <button onclick="batchWatch('normal')" style="padding:4px 12px;border-radius:6px;border:1px solid rgba(255,255,255,.4);background:transparent;color:#fff;cursor:pointer;font-size:12px">设为普通监控</button>
+          <button onclick="batchUnwatch()" style="padding:4px 12px;border-radius:6px;border:1px solid rgba(255,255,255,.4);background:transparent;color:#fff;cursor:pointer;font-size:12px">取消监控</button>
+          <button onclick="clearSelection()" style="padding:4px 12px;border-radius:6px;border:1px solid rgba(255,255,255,.4);background:transparent;color:#fff;cursor:pointer;font-size:12px;margin-left:auto">取消选择</button>
+        </div>
+
+        <div class="panel"><div class="panel-body" id="items-list" style="max-height:calc(100vh - 280px);overflow-y:auto"></div></div>
+        <div style="display:flex;justify-content:center;gap:8px;margin-top:12px" id="items-pager"></div>
+      \`;
+
+      window._selectedItems=new Set();
+      window._itemsPage=1;
+      window._itemsData=[];
+
+      async function loadItems(page=1){
+        const search=document.getElementById('items-search')?.value||'';
+        const cat=document.getElementById('items-cat')?.value||'';
+        const pri=document.getElementById('items-priority')?.value||'';
+        let url=API+'/items?page='+page+'&limit=50';
+        if(search)url+='&search='+encodeURIComponent(search);
+        if(cat)url+='&category='+cat;
+        if(pri)url+='&priority='+pri;
+        const r=await fetch(url).then(r=>r.json());
+        window._itemsData=r.items;
+        window._itemsPage=page;
+        document.getElementById('items-total').textContent=r.total+' 项';
+        const list=document.getElementById('items-list');
+        if(!r.items.length){
+          list.innerHTML='<div class="panel-empty" style="padding:40px;text-align:center;color:var(--text-muted)"><div>暂无商品</div><div style="margin-top:8px;font-size:13px">点击「全量扫描」获取 BUFF 全部 CS2 商品</div></div>';
+        } else {
+          list.innerHTML=\`<div style="display:flex;align-items:center;padding:6px 12px;border-bottom:1px solid var(--border);font-size:12px;color:var(--text-muted)">
+            <label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" id="select-all" onchange="toggleSelectAll(this.checked)" style="width:16px;height:16px;cursor:pointer"/> 全选</label>
+            <span style="margin-left:auto">\${r.items.length}/\${r.total}</span>
+          </div>\`+r.items.map(i=>{
+            const priLabel=i.watch_priority==='high'?'<span style="color:var(--red);font-weight:600">●</span> 高优先':i.watch_priority==='normal'?'<span style="color:var(--accent);font-weight:600">●</span> 监控中':'<span style="color:var(--text-muted)">○</span> 未监控';
+            const catLabel=catLabels[i.category]||i.category||'未分类';
+            return \`<div class="list-item" style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-bottom:1px solid var(--border);transition:background .15s" onmouseenter="this.style.background='var(--bg-card-hover)'" onmouseleave="this.style.background='transparent'">
+              <input type="checkbox" class="item-cb" data-id="\${i.id}" onchange="onItemCheck()" style="width:16px;height:16px;cursor:pointer;flex-shrink:0" \${window._selectedItems.has(i.id)?'checked':''}/>
+              <div style="flex:1;min-width:0">
+                <div style="font-size:14px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">\${i.name}</div>
+                <div style="font-size:12px;color:var(--text-muted);margin-top:2px">\${priLabel} · \${catLabel} · 在售 \${i.sell_count||0}</div>
+              </div>
+              <div style="text-align:right;flex-shrink:0">
+                <div style="font-size:15px;font-weight:600">¥\${i.buff_min_price||'--'}</div>
+                \${i.steam_price?\`<div style="font-size:11px;color:var(--text-muted)">Steam ¥\${i.steam_price}</div>\`:''}
+              </div>
+              <div style="display:flex;gap:4px;flex-shrink:0">
+                <button onclick="quickWatch(\${i.id},'\${i.watch_priority==='high'?'none':'high'}')" title="\${i.watch_priority==='high'?'取消监控':'设为高优先'}" style="width:28px;height:28px;border-radius:6px;border:1px solid var(--border);background:transparent;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:14px">\${i.watch_priority==='high'?'★':'☆'}</button>
+              </div>
+            </div>\`;
+          }).join('');
+        }
+
+        const totalPages=Math.ceil(r.total/50);
+        const pager=document.getElementById('items-pager');
+        if(totalPages>1){
+          let btns='';
+          if(page>1) btns+=\`<button onclick="loadItems(\${page-1})" style="padding:6px 12px;border:1px solid var(--border);border-radius:6px;background:var(--card);color:var(--text);cursor:pointer">上一页</button>\`;
+          btns+=\`<span style="padding:6px 12px;color:var(--text-muted)">\${page}/\${totalPages}</span>\`;
+          if(page<totalPages) btns+=\`<button onclick="loadItems(\${page+1})" style="padding:6px 12px;border:1px solid var(--border);border-radius:6px;background:var(--card);color:var(--text);cursor:pointer">下一页</button>\`;
+          pager.innerHTML=btns;
+        } else pager.innerHTML='';
+      }
+      window.loadItems=loadItems;
+
+      window.onItemCheck=function(){
+        window._selectedItems=new Set();
+        document.querySelectorAll('.item-cb:checked').forEach(cb=>window._selectedItems.add(parseInt(cb.dataset.id)));
+        const n=window._selectedItems.size;
+        document.getElementById('sel-count').textContent=n;
+        document.getElementById('batch-bar').style.display=n>0?'flex':'none';
+      };
+      window.toggleSelectAll=function(checked){
+        document.querySelectorAll('.item-cb').forEach(cb=>{cb.checked=checked;});
+        window.onItemCheck();
+      };
+      window.clearSelection=function(){
+        window._selectedItems.clear();
+        document.querySelectorAll('.item-cb').forEach(cb=>{cb.checked=false;});
+        document.getElementById('select-all')&&(document.getElementById('select-all').checked=false);
+        document.getElementById('batch-bar').style.display='none';
+        document.getElementById('sel-count').textContent='0';
+      };
+      window.batchWatch=async function(pri){
+        const ids=[...window._selectedItems];
+        if(!ids.length)return;
+        await fetch(API+'/items/batch-watch',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ids,priority:pri})});
+        window.clearSelection();loadItems(window._itemsPage);
+      };
+      window.batchUnwatch=async function(){
+        const ids=[...window._selectedItems];
+        if(!ids.length)return;
+        await fetch(API+'/items/batch-unwatch',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ids})});
+        window.clearSelection();loadItems(window._itemsPage);
+      };
+      window.quickWatch=async function(id,pri){
+        await fetch(API+'/items/batch-watch',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ids:[id],priority:pri})});
+        loadItems(window._itemsPage);
+      };
+      window.startFullScan=async function(){
+        const btn=event.target;btn.disabled=true;btn.textContent='扫描中...';
+        await fetch(API+'/items/scan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({full:true})});
+        const poll=setInterval(async()=>{
+          const st=await fetch(API+'/items/scan-status').then(r=>r.json());
+          if(!st.running){clearInterval(poll);btn.disabled=false;btn.textContent='全量扫描';loadItems(1);}
+        },5000);
+      };
+
+      let debounceTimer;
+      document.getElementById('items-search').addEventListener('input',()=>{clearTimeout(debounceTimer);debounceTimer=setTimeout(()=>loadItems(1),400);});
+      document.getElementById('items-cat').addEventListener('change',()=>loadItems(1));
+      document.getElementById('items-priority').addEventListener('change',()=>loadItems(1));
+      loadItems(1);
     }
     else if(currentTab==='portfolio'){
       const r=await fetch(API+'/portfolio').then(r=>r.json());
