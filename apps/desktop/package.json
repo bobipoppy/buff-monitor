@@ -52,6 +52,6 @@
         "to": "nextjs/apps/web/.next/static"
       }
     ],
-    "asar": true
+    "asar": false
   }
 }
