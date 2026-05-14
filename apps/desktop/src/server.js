@@ -295,56 +295,281 @@ function getEmbeddedDashboard() {
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>BUFF Monitor</title>
 <style>
+:root{--bg-primary:#0c0c16;--bg-secondary:#12121f;--bg-card:#181828;--bg-card-hover:#1e1e32;--border:#252540;--border-active:#6366f1;--text-primary:#f1f5f9;--text-secondary:#94a3b8;--text-muted:#64748b;--accent:#6366f1;--accent-light:#818cf8;--accent-glow:rgba(99,102,241,0.15);--green:#10b981;--green-bg:rgba(16,185,129,0.1);--red:#ef4444;--red-bg:rgba(239,68,68,0.1);--yellow:#f59e0b;--yellow-bg:rgba(245,158,11,0.1);--radius:14px;--radius-sm:10px}
 *{margin:0;padding:0;box-sizing:border-box}
-body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;background:#0f0f1a;color:#e2e8f0;min-height:100vh}
-.header{background:linear-gradient(135deg,#1a1a2e,#16213e);padding:20px 30px;-webkit-app-region:drag;display:flex;align-items:center;gap:12px}
-.header h1{font-size:20px;background:linear-gradient(135deg,#667eea,#764ba2);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
-.container{padding:30px;max-width:1200px;margin:0 auto}
-.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:20px;margin-bottom:30px}
-.card{background:#1a1a2e;border-radius:12px;padding:24px;border:1px solid #2d2d44}
-.card h3{font-size:13px;color:#8b8fa3;text-transform:uppercase;letter-spacing:1px;margin-bottom:8px}
-.card .value{font-size:28px;font-weight:700}
-.section{background:#1a1a2e;border-radius:12px;padding:24px;border:1px solid #2d2d44;margin-bottom:20px}
-.section h2{font-size:16px;margin-bottom:16px;color:#a78bfa}
-.alert-item{padding:12px 0;border-bottom:1px solid #2d2d44;display:flex;justify-content:space-between;align-items:center}
-.alert-item:last-child{border:none}
-.setup-form{display:flex;flex-direction:column;gap:12px;max-width:500px}
-.setup-form input{background:#16213e;border:1px solid #2d2d44;border-radius:8px;padding:12px;color:#e2e8f0;font-size:14px}
-.setup-form button{background:linear-gradient(135deg,#667eea,#764ba2);border:none;border-radius:8px;padding:12px;color:white;font-weight:600;cursor:pointer}
-.setup-form button:hover{opacity:0.9}
-.status{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:8px}
-.status.ok{background:#10b981}.status.warn{background:#f59e0b}.status.err{background:#ef4444}
-.empty{color:#8b8fa3;text-align:center;padding:40px}
-#tab-bar{display:flex;gap:4px;margin-bottom:24px}
-#tab-bar button{background:transparent;border:1px solid #2d2d44;border-radius:8px;padding:8px 16px;color:#8b8fa3;cursor:pointer}
-#tab-bar button.active{background:#667eea33;border-color:#667eea;color:#e2e8f0}
+body{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","SF Pro Text",sans-serif;background:var(--bg-primary);color:var(--text-primary);min-height:100vh;overflow-x:hidden}
+::-webkit-scrollbar{width:6px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:#333;border-radius:3px}
+
+.titlebar{height:52px;background:var(--bg-secondary);-webkit-app-region:drag;display:flex;align-items:center;padding:0 90px;border-bottom:1px solid var(--border);position:sticky;top:0;z-index:100;backdrop-filter:blur(20px)}
+.titlebar-title{font-size:13px;font-weight:600;color:var(--text-secondary);letter-spacing:0.3px}
+
+.layout{display:flex;height:calc(100vh - 52px)}
+.sidebar{width:220px;background:var(--bg-secondary);border-right:1px solid var(--border);padding:20px 12px;display:flex;flex-direction:column;gap:4px;flex-shrink:0}
+.nav-item{display:flex;align-items:center;gap:10px;padding:10px 14px;border-radius:var(--radius-sm);cursor:pointer;color:var(--text-secondary);font-size:13px;font-weight:500;transition:all 0.15s ease;border:1px solid transparent}
+.nav-item:hover{background:var(--bg-card);color:var(--text-primary)}
+.nav-item.active{background:var(--accent-glow);color:var(--accent-light);border-color:rgba(99,102,241,0.2)}
+.nav-item svg{width:18px;height:18px;flex-shrink:0}
+.nav-section{font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1.2px;padding:16px 14px 6px;font-weight:600}
+
+.main{flex:1;overflow-y:auto;padding:28px 32px}
+.page-title{font-size:22px;font-weight:700;margin-bottom:24px;display:flex;align-items:center;gap:10px}
+.page-title .badge{font-size:12px;background:var(--accent-glow);color:var(--accent-light);padding:4px 10px;border-radius:20px;font-weight:500}
+
+.stats-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-bottom:28px}
+.stat-card{background:var(--bg-card);border-radius:var(--radius);padding:22px;border:1px solid var(--border);transition:all 0.2s ease;position:relative;overflow:hidden}
+.stat-card:hover{border-color:var(--border-active);transform:translateY(-1px);box-shadow:0 8px 24px rgba(0,0,0,0.3)}
+.stat-card::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,var(--accent),var(--accent-light));opacity:0;transition:opacity 0.2s}
+.stat-card:hover::before{opacity:1}
+.stat-label{font-size:12px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.8px;margin-bottom:8px;font-weight:600}
+.stat-value{font-size:26px;font-weight:700;letter-spacing:-0.5px}
+.stat-sub{font-size:12px;color:var(--text-muted);margin-top:6px}
+
+.panel{background:var(--bg-card);border-radius:var(--radius);border:1px solid var(--border);margin-bottom:20px;overflow:hidden}
+.panel-header{padding:18px 22px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
+.panel-title{font-size:14px;font-weight:600;color:var(--text-primary)}
+.panel-badge{font-size:11px;background:var(--accent-glow);color:var(--accent-light);padding:3px 8px;border-radius:12px}
+.panel-body{padding:6px 0}
+.panel-empty{padding:48px 22px;text-align:center;color:var(--text-muted);font-size:14px}
+.panel-empty svg{width:48px;height:48px;margin-bottom:12px;opacity:0.3}
+
+.list-item{display:flex;align-items:center;justify-content:space-between;padding:14px 22px;border-bottom:1px solid var(--border);transition:background 0.15s}
+.list-item:last-child{border-bottom:none}
+.list-item:hover{background:var(--bg-card-hover)}
+.list-item-left{display:flex;align-items:center;gap:12px}
+.list-item-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.list-item-dot.high{background:var(--green);box-shadow:0 0 8px var(--green)}
+.list-item-dot.normal{background:var(--yellow)}
+.list-item-dot.low{background:var(--text-muted)}
+.list-item-name{font-size:13px;font-weight:500}
+.list-item-meta{font-size:12px;color:var(--text-muted)}
+.list-item-right{text-align:right}
+.list-item-price{font-size:14px;font-weight:600}
+.list-item-change{font-size:12px;margin-top:2px}
+.list-item-change.up{color:var(--green)}.list-item-change.down{color:var(--red)}
+.list-item-time{font-size:11px;color:var(--text-muted)}
+
+.form-group{margin-bottom:16px}
+.form-label{font-size:12px;color:var(--text-secondary);margin-bottom:6px;display:block;font-weight:500}
+.form-input{width:100%;background:var(--bg-secondary);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px 14px;color:var(--text-primary);font-size:13px;transition:border-color 0.2s;outline:none}
+.form-input:focus{border-color:var(--accent)}
+.form-input::placeholder{color:var(--text-muted)}
+.form-hint{font-size:11px;color:var(--text-muted);margin-top:4px}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:10px 20px;border-radius:var(--radius-sm);font-size:13px;font-weight:600;cursor:pointer;transition:all 0.15s;border:none}
+.btn-primary{background:var(--accent);color:white}
+.btn-primary:hover{background:var(--accent-light);transform:translateY(-1px);box-shadow:0 4px 12px rgba(99,102,241,0.3)}
+.btn-ghost{background:transparent;border:1px solid var(--border);color:var(--text-secondary)}
+.btn-ghost:hover{border-color:var(--text-muted);color:var(--text-primary)}
+
+.toast{position:fixed;bottom:24px;right:24px;background:var(--bg-card);border:1px solid var(--green);border-radius:var(--radius-sm);padding:12px 18px;color:var(--green);font-size:13px;font-weight:500;opacity:0;transform:translateY(10px);transition:all 0.3s;pointer-events:none;z-index:999}
+.toast.show{opacity:1;transform:translateY(0)}
+
+.welcome{text-align:center;padding:60px 40px}
+.welcome-icon{width:80px;height:80px;margin:0 auto 20px;background:var(--accent-glow);border-radius:50%;display:flex;align-items:center;justify-content:center}
+.welcome-icon svg{width:36px;height:36px;color:var(--accent-light)}
+.welcome h2{font-size:18px;margin-bottom:8px}
+.welcome p{color:var(--text-muted);font-size:14px;line-height:1.6;max-width:400px;margin:0 auto}
 </style>
 </head>
 <body>
-<div class="header"><h1>BUFF Monitor</h1><span style="color:#8b8fa3;font-size:13px">v1.0</span></div>
-<div class="container">
-<div id="tab-bar">
-<button class="active" onclick="showTab('dashboard')">仪表盘</button>
-<button onclick="showTab('items')">监控列表</button>
-<button onclick="showTab('portfolio')">持仓</button>
-<button onclick="showTab('settings')">设置</button>
+<div class="titlebar"><span class="titlebar-title">BUFF Monitor</span></div>
+<div class="layout">
+<div class="sidebar">
+<div class="nav-section">概览</div>
+<div class="nav-item active" data-tab="dashboard">
+<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+仪表盘</div>
+<div class="nav-item" data-tab="items">
+<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/><path d="M9 12l2 2 4-4"/></svg>
+监控列表</div>
+<div class="nav-item" data-tab="portfolio">
+<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+持仓管理</div>
+<div class="nav-section">系统</div>
+<div class="nav-item" data-tab="settings">
+<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06A1.65 1.65 0 009 4.6a1.65 1.65 0 001-1.51V3a2 2 0 114 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
+设置</div>
 </div>
-<div id="content"><div class="empty">加载中...</div></div>
+<div class="main" id="content"></div>
 </div>
+<div class="toast" id="toast"></div>
+
 <script>
 const API='http://localhost:3001/api';
 let currentTab='dashboard';
-function showTab(t){currentTab=t;document.querySelectorAll('#tab-bar button').forEach(b=>b.classList.remove('active'));document.querySelectorAll('#tab-bar button')[['dashboard','items','portfolio','settings'].indexOf(t)].classList.add('active');render();}
-async function render(){const c=document.getElementById('content');try{if(currentTab==='dashboard'){const r=await fetch(API+'/dashboard').then(r=>r.json());c.innerHTML=\`
-<div class="stats"><div class="card"><h3>监控物品</h3><div class="value">\${r.watchedItems}</div></div><div class="card"><h3>持仓数量</h3><div class="value">\${r.portfolio.total_holdings}</div></div><div class="card"><h3>总投入</h3><div class="value">¥\${Number(r.portfolio.total_invested).toFixed(2)}</div></div></div>
-<div class="section"><h2>最近告警</h2>\${r.recentAlerts.length?r.recentAlerts.map(a=>\`<div class="alert-item"><span>\${a.item_name}: \${a.message}</span><span style="color:#8b8fa3;font-size:12px">\${new Date(a.triggered_at).toLocaleString()}</span></div>\`).join(''):'<div class="empty">暂无告警</div>'}</div>\`;}
-else if(currentTab==='items'){const r=await fetch(API+'/items').then(r=>r.json());c.innerHTML=\`<div class="section"><h2>监控列表 (\${r.total})</h2>\${r.items.length?r.items.map(i=>\`<div class="alert-item"><span><span class="status \${i.watch_priority==='high'?'ok':'warn'}"></span>\${i.name}</span><span>¥\${i.buff_min_price||'-'}</span></div>\`).join(''):'<div class="empty">暂无监控物品，请在设置中配置 Cookie 后添加</div>'}</div>\`;}
-else if(currentTab==='portfolio'){const r=await fetch(API+'/portfolio').then(r=>r.json());c.innerHTML=\`<div class="stats"><div class="card"><h3>总投入</h3><div class="value">¥\${r.summary.totalInvested}</div></div><div class="card"><h3>未实现盈亏</h3><div class="value" style="color:\${r.summary.totalUnrealizedPnl>=0?'#10b981':'#ef4444'}">¥\${r.summary.totalUnrealizedPnl}</div></div><div class="card"><h3>收益率</h3><div class="value">\${r.summary.overallReturn}%</div></div></div>
-<div class="section"><h2>持仓明细</h2>\${r.items.length?r.items.map(i=>\`<div class="alert-item"><span>\${i.item_name} x\${i.quantity}</span><span>买入 ¥\${i.buy_price} | 现价 ¥\${i.current_price||'-'}</span></div>\`).join(''):'<div class="empty">暂无持仓</div>'}</div>\`;}
-else if(currentTab==='settings'){const cookie=await fetch(API+'/config/buff_cookie').then(r=>r.json());const token=await fetch(API+'/config/pushplus_token').then(r=>r.json());c.innerHTML=\`<div class="section"><h2>基础配置</h2><div class="setup-form"><input id="cookie" placeholder="BUFF Cookie (登录后从浏览器复制)" value="\${cookie.value||''}"><input id="token" placeholder="PushPlus Token (微信通知)" value="\${token.value||''}"><button onclick="saveConfig()">保存配置</button></div></div>\`;}
-}catch(e){c.innerHTML='<div class="empty">连接失败: '+e.message+'</div>';}}
-async function saveConfig(){const cookie=document.getElementById('cookie').value;const token=document.getElementById('token').value;if(cookie)await fetch(API+'/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:'buff_cookie',value:cookie})});if(token)await fetch(API+'/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:'pushplus_token',value:token})});alert('配置已保存');render();}
-render();setInterval(()=>{if(currentTab==='dashboard')render();},30000);
+
+document.querySelectorAll('.nav-item').forEach(item=>{
+  item.addEventListener('click',()=>{
+    document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));
+    item.classList.add('active');
+    currentTab=item.dataset.tab;
+    render();
+  });
+});
+
+function showToast(msg){
+  const t=document.getElementById('toast');
+  t.textContent=msg;t.classList.add('show');
+  setTimeout(()=>t.classList.remove('show'),2500);
+}
+
+async function render(){
+  const c=document.getElementById('content');
+  try{
+    if(currentTab==='dashboard'){
+      const r=await fetch(API+'/dashboard').then(r=>r.json());
+      c.innerHTML=\`
+        <div class="page-title">仪表盘 <span class="badge">实时</span></div>
+        <div class="stats-grid">
+          <div class="stat-card">
+            <div class="stat-label">监控物品</div>
+            <div class="stat-value">\${r.watchedItems}</div>
+            <div class="stat-sub">活跃监控中</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">持仓数量</div>
+            <div class="stat-value">\${r.portfolio.total_holdings}</div>
+            <div class="stat-sub">当前持有</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">总投入</div>
+            <div class="stat-value" style="color:var(--accent-light)">¥\${Number(r.portfolio.total_invested).toFixed(2)}</div>
+            <div class="stat-sub">累计投入金额</div>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="panel-header">
+            <span class="panel-title">最近告警</span>
+            \${r.recentAlerts.length?'<span class="panel-badge">'+r.recentAlerts.length+'</span>':''}
+          </div>
+          <div class="panel-body">
+            \${r.recentAlerts.length?r.recentAlerts.map(a=>\`
+              <div class="list-item">
+                <div class="list-item-left">
+                  <div class="list-item-dot high"></div>
+                  <div><div class="list-item-name">\${a.item_name}</div><div class="list-item-meta">\${a.message}</div></div>
+                </div>
+                <div class="list-item-right"><div class="list-item-price">¥\${a.current_price||'-'}</div><div class="list-item-time">\${new Date(a.triggered_at).toLocaleString('zh-CN',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})}</div></div>
+              </div>\`).join(''):'<div class="panel-empty"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M18.364 5.636a9 9 0 11-12.728 0M12 9v4m0 4h.01"/></svg><div>暂无告警通知</div></div>'}
+          </div>
+        </div>\`;
+    }
+    else if(currentTab==='items'){
+      const r=await fetch(API+'/items').then(r=>r.json());
+      c.innerHTML=\`
+        <div class="page-title">监控列表 <span class="badge">\${r.total} 项</span></div>
+        \${r.items.length?\`<div class="panel"><div class="panel-body">\${r.items.map(i=>\`
+          <div class="list-item">
+            <div class="list-item-left">
+              <div class="list-item-dot \${i.watch_priority}"></div>
+              <div><div class="list-item-name">\${i.name}</div><div class="list-item-meta">\${i.game} · \${i.watch_priority==='high'?'高优先':'普通'}</div></div>
+            </div>
+            <div class="list-item-right"><div class="list-item-price">¥\${i.buff_min_price||'--'}</div></div>
+          </div>\`).join('')}</div></div>\`:\`
+        <div class="welcome">
+          <div class="welcome-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg></div>
+          <h2>开始监控</h2>
+          <p>前往「设置」配置你的 BUFF Cookie，然后添加想要监控的饰品。系统会自动追踪价格变化并发送通知。</p>
+        </div>\`}\`;
+    }
+    else if(currentTab==='portfolio'){
+      const r=await fetch(API+'/portfolio').then(r=>r.json());
+      c.innerHTML=\`
+        <div class="page-title">持仓管理</div>
+        <div class="stats-grid">
+          <div class="stat-card">
+            <div class="stat-label">总投入</div>
+            <div class="stat-value">¥\${r.summary.totalInvested}</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">未实现盈亏</div>
+            <div class="stat-value" style="color:\${r.summary.totalUnrealizedPnl>=0?'var(--green)':'var(--red)'}">
+              \${r.summary.totalUnrealizedPnl>=0?'+':''}¥\${r.summary.totalUnrealizedPnl}
+            </div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">总收益率</div>
+            <div class="stat-value" style="color:\${r.summary.overallReturn>=0?'var(--green)':'var(--red)'}">
+              \${r.summary.overallReturn>=0?'+':''}\${r.summary.overallReturn}%
+            </div>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="panel-header"><span class="panel-title">持仓明细</span><span class="panel-badge">\${r.items.length} 件</span></div>
+          <div class="panel-body">
+            \${r.items.length?r.items.map(i=>{
+              const pnlPct=i.profitRate?((i.profitRate*100).toFixed(1)):'0';
+              const isUp=parseFloat(pnlPct)>=0;
+              return \`<div class="list-item">
+                <div class="list-item-left">
+                  <div class="list-item-dot \${isUp?'high':''}"></div>
+                  <div><div class="list-item-name">\${i.item_name}</div><div class="list-item-meta">x\${i.quantity} · 买入 ¥\${i.buy_price}</div></div>
+                </div>
+                <div class="list-item-right">
+                  <div class="list-item-price">¥\${i.current_price||'--'}</div>
+                  <div class="list-item-change \${isUp?'up':'down'}">\${isUp?'+':''}\${pnlPct}%</div>
+                </div>
+              </div>\`;}).join(''):'<div class="panel-empty"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M20 12V8H6a2 2 0 01-2-2c0-1.1.9-2 2-2h12v4"/><path d="M4 6v12c0 1.1.9 2 2 2h14v-4"/><path d="M18 12a2 2 0 000 4h4v-4h-4z"/></svg><div>暂无持仓记录</div></div>'}
+          </div>
+        </div>\`;
+    }
+    else if(currentTab==='settings'){
+      const cookie=await fetch(API+'/config/buff_cookie').then(r=>r.json());
+      const token=await fetch(API+'/config/pushplus_token').then(r=>r.json());
+      c.innerHTML=\`
+        <div class="page-title">设置</div>
+        <div class="panel">
+          <div class="panel-header"><span class="panel-title">BUFF 连接配置</span></div>
+          <div style="padding:22px">
+            <div class="form-group">
+              <label class="form-label">BUFF Cookie</label>
+              <input class="form-input" id="cookie" placeholder="从浏览器登录 BUFF 后复制 Cookie" value="\${cookie.value||''}">
+              <div class="form-hint">打开 buff.163.com → F12 开发者工具 → Application → Cookies → 复制 session 值</div>
+            </div>
+            <div class="form-group">
+              <label class="form-label">PushPlus Token（微信推送）</label>
+              <input class="form-input" id="token" placeholder="从 pushplus.plus 获取 Token" value="\${token.value||''}">
+              <div class="form-hint">访问 pushplus.plus 注册并获取 Token，用于接收微信通知</div>
+            </div>
+            <div style="display:flex;gap:10px;margin-top:8px">
+              <button class="btn btn-primary" onclick="saveConfig()">保存配置</button>
+              <button class="btn btn-ghost" onclick="testConfig()">测试连接</button>
+            </div>
+          </div>
+        </div>
+        <div class="panel" style="margin-top:16px">
+          <div class="panel-header"><span class="panel-title">关于</span></div>
+          <div style="padding:22px;color:var(--text-muted);font-size:13px;line-height:1.8">
+            <div>BUFF Monitor v1.0.0</div>
+            <div>网易 BUFF 饰品价格监控与交易信号分析工具</div>
+            <div style="margin-top:8px">技术栈：Electron + Express + SQLite + 技术分析算法</div>
+          </div>
+        </div>\`;
+    }
+  }catch(e){
+    c.innerHTML='<div class="welcome"><div class="welcome-icon" style="background:var(--red-bg)"><svg viewBox="0 0 24 24" fill="none" stroke="var(--red)" stroke-width="1.5" style="width:36px;height:36px"><circle cx="12" cy="12" r="10"/><path d="M12 8v4m0 4h.01"/></svg></div><h2>连接失败</h2><p>'+e.message+'</p></div>';
+  }
+}
+
+async function saveConfig(){
+  const cookie=document.getElementById('cookie').value;
+  const token=document.getElementById('token').value;
+  if(cookie)await fetch(API+'/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:'buff_cookie',value:cookie})});
+  if(token)await fetch(API+'/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:'pushplus_token',value:token})});
+  showToast('配置已保存');
+}
+
+async function testConfig(){
+  try{
+    const r=await fetch(API+'/health');
+    if(r.ok)showToast('连接正常');
+    else showToast('连接异常');
+  }catch(e){showToast('连接失败: '+e.message);}
+}
+
+render();
+setInterval(()=>{if(currentTab==='dashboard')render();},30000);
 </script>
 </body></html>`;
 }
