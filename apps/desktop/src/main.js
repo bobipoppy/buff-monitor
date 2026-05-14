@@ -9,7 +9,6 @@ if (!Module.globalPaths.includes(nodeModulesPath)) {
 }
 
 const { app, BrowserWindow, Tray, Menu, nativeImage, Notification, ipcMain, shell } = require('electron');
-const { spawn } = require('child_process');
 const { startServer, stopServer } = require('./server');
 const { initDatabase } = require('./database');
 const Store = require('electron-store');
@@ -18,9 +17,6 @@ const store = new Store();
 let mainWindow = null;
 let tray = null;
 let serverPort = 3001;
-let nextProcess = null;
-let webPort = 3000;
-
 const isDev = !app.isPackaged;
 
 function createWindow() {
@@ -39,7 +35,7 @@ function createWindow() {
     },
   });
 
-  const webUrl = isDev ? 'http://localhost:3000' : `http://localhost:${webPort}`;
+  const webUrl = isDev ? 'http://localhost:3000' : `http://localhost:${serverPort}`;
   mainWindow.loadURL(webUrl);
 
   if (isDev) {
@@ -180,37 +176,11 @@ ipcMain.handle('show-notification', (_event, title, body) => {
   new Notification({ title, body }).show();
 });
 
-async function startNextServer() {
-  if (isDev) return;
-
-  const nextjsPath = path.join(process.resourcesPath, 'nextjs', 'apps', 'web');
-  const serverFile = path.join(nextjsPath, 'server.js');
-
-  webPort = 3000;
-  nextProcess = spawn(process.execPath, [serverFile], {
-    env: {
-      ...process.env,
-      PORT: String(webPort),
-      HOSTNAME: '127.0.0.1',
-      NEXT_PUBLIC_API_URL: `http://localhost:${serverPort}`,
-    },
-    cwd: nextjsPath,
-    stdio: 'pipe',
-  });
-
-  nextProcess.stdout.on('data', (d) => console.log('[Next]', d.toString().trim()));
-  nextProcess.stderr.on('data', (d) => console.error('[Next]', d.toString().trim()));
-
-  await new Promise((resolve) => setTimeout(resolve, 2000));
-}
-
 app.whenReady().then(async () => {
   try {
     initDatabase();
     serverPort = await startServer();
     console.log(`API server started on port ${serverPort}`);
-
-    await startNextServer();
   } catch (err) {
     console.error('Failed to start:', err);
   }
@@ -232,5 +202,4 @@ app.on('window-all-closed', () => {
 app.on('before-quit', () => {
   app.isQuitting = true;
   stopServer();
-  if (nextProcess) nextProcess.kill();
 });

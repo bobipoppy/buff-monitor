@@ -20,7 +20,10 @@ function startServer() {
     const isDev = !electronApp.isPackaged;
     if (!isDev) {
       const webPath = path.join(process.resourcesPath, 'web');
-      app.use(express.static(webPath));
+      const fs = require('fs');
+      if (fs.existsSync(webPath)) {
+        app.use(express.static(webPath));
+      }
     }
 
     // Health check
@@ -235,12 +238,17 @@ function startServer() {
       res.json({ success: true });
     });
 
-    // Catch-all for SPA (production)
-    if (!isDev) {
-      app.get('*', (_req, res) => {
-        res.sendFile(path.join(process.resourcesPath, 'web', 'index.html'));
-      });
-    }
+    // Catch-all: serve embedded dashboard
+    app.get('*', (_req, res) => {
+      const fs = require('fs');
+      if (!isDev) {
+        const indexPath = path.join(process.resourcesPath, 'web', 'index.html');
+        if (fs.existsSync(indexPath)) {
+          return res.sendFile(indexPath);
+        }
+      }
+      res.send(getEmbeddedDashboard());
+    });
 
     const port = 3001;
     server = app.listen(port, '127.0.0.1', () => {
@@ -278,6 +286,67 @@ async function checkAlerts() {
     const content = formatSignalMessage(item.name, actionable, analysis.currentPrice);
     sendWeChatNotification(`[BUFF] ${item.name}`, content);
   }
+}
+
+function getEmbeddedDashboard() {
+  return `<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>BUFF Monitor</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;background:#0f0f1a;color:#e2e8f0;min-height:100vh}
+.header{background:linear-gradient(135deg,#1a1a2e,#16213e);padding:20px 30px;-webkit-app-region:drag;display:flex;align-items:center;gap:12px}
+.header h1{font-size:20px;background:linear-gradient(135deg,#667eea,#764ba2);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.container{padding:30px;max-width:1200px;margin:0 auto}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:20px;margin-bottom:30px}
+.card{background:#1a1a2e;border-radius:12px;padding:24px;border:1px solid #2d2d44}
+.card h3{font-size:13px;color:#8b8fa3;text-transform:uppercase;letter-spacing:1px;margin-bottom:8px}
+.card .value{font-size:28px;font-weight:700}
+.section{background:#1a1a2e;border-radius:12px;padding:24px;border:1px solid #2d2d44;margin-bottom:20px}
+.section h2{font-size:16px;margin-bottom:16px;color:#a78bfa}
+.alert-item{padding:12px 0;border-bottom:1px solid #2d2d44;display:flex;justify-content:space-between;align-items:center}
+.alert-item:last-child{border:none}
+.setup-form{display:flex;flex-direction:column;gap:12px;max-width:500px}
+.setup-form input{background:#16213e;border:1px solid #2d2d44;border-radius:8px;padding:12px;color:#e2e8f0;font-size:14px}
+.setup-form button{background:linear-gradient(135deg,#667eea,#764ba2);border:none;border-radius:8px;padding:12px;color:white;font-weight:600;cursor:pointer}
+.setup-form button:hover{opacity:0.9}
+.status{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:8px}
+.status.ok{background:#10b981}.status.warn{background:#f59e0b}.status.err{background:#ef4444}
+.empty{color:#8b8fa3;text-align:center;padding:40px}
+#tab-bar{display:flex;gap:4px;margin-bottom:24px}
+#tab-bar button{background:transparent;border:1px solid #2d2d44;border-radius:8px;padding:8px 16px;color:#8b8fa3;cursor:pointer}
+#tab-bar button.active{background:#667eea33;border-color:#667eea;color:#e2e8f0}
+</style>
+</head>
+<body>
+<div class="header"><h1>BUFF Monitor</h1><span style="color:#8b8fa3;font-size:13px">v1.0</span></div>
+<div class="container">
+<div id="tab-bar">
+<button class="active" onclick="showTab('dashboard')">仪表盘</button>
+<button onclick="showTab('items')">监控列表</button>
+<button onclick="showTab('portfolio')">持仓</button>
+<button onclick="showTab('settings')">设置</button>
+</div>
+<div id="content"><div class="empty">加载中...</div></div>
+</div>
+<script>
+const API='http://localhost:3001/api';
+let currentTab='dashboard';
+function showTab(t){currentTab=t;document.querySelectorAll('#tab-bar button').forEach(b=>b.classList.remove('active'));document.querySelectorAll('#tab-bar button')[['dashboard','items','portfolio','settings'].indexOf(t)].classList.add('active');render();}
+async function render(){const c=document.getElementById('content');try{if(currentTab==='dashboard'){const r=await fetch(API+'/dashboard').then(r=>r.json());c.innerHTML=\`
+<div class="stats"><div class="card"><h3>监控物品</h3><div class="value">\${r.watchedItems}</div></div><div class="card"><h3>持仓数量</h3><div class="value">\${r.portfolio.total_holdings}</div></div><div class="card"><h3>总投入</h3><div class="value">¥\${Number(r.portfolio.total_invested).toFixed(2)}</div></div></div>
+<div class="section"><h2>最近告警</h2>\${r.recentAlerts.length?r.recentAlerts.map(a=>\`<div class="alert-item"><span>\${a.item_name}: \${a.message}</span><span style="color:#8b8fa3;font-size:12px">\${new Date(a.triggered_at).toLocaleString()}</span></div>\`).join(''):'<div class="empty">暂无告警</div>'}</div>\`;}
+else if(currentTab==='items'){const r=await fetch(API+'/items').then(r=>r.json());c.innerHTML=\`<div class="section"><h2>监控列表 (\${r.total})</h2>\${r.items.length?r.items.map(i=>\`<div class="alert-item"><span><span class="status \${i.watch_priority==='high'?'ok':'warn'}"></span>\${i.name}</span><span>¥\${i.buff_min_price||'-'}</span></div>\`).join(''):'<div class="empty">暂无监控物品，请在设置中配置 Cookie 后添加</div>'}</div>\`;}
+else if(currentTab==='portfolio'){const r=await fetch(API+'/portfolio').then(r=>r.json());c.innerHTML=\`<div class="stats"><div class="card"><h3>总投入</h3><div class="value">¥\${r.summary.totalInvested}</div></div><div class="card"><h3>未实现盈亏</h3><div class="value" style="color:\${r.summary.totalUnrealizedPnl>=0?'#10b981':'#ef4444'}">¥\${r.summary.totalUnrealizedPnl}</div></div><div class="card"><h3>收益率</h3><div class="value">\${r.summary.overallReturn}%</div></div></div>
+<div class="section"><h2>持仓明细</h2>\${r.items.length?r.items.map(i=>\`<div class="alert-item"><span>\${i.item_name} x\${i.quantity}</span><span>买入 ¥\${i.buy_price} | 现价 ¥\${i.current_price||'-'}</span></div>\`).join(''):'<div class="empty">暂无持仓</div>'}</div>\`;}
+else if(currentTab==='settings'){const cookie=await fetch(API+'/config/buff_cookie').then(r=>r.json());const token=await fetch(API+'/config/pushplus_token').then(r=>r.json());c.innerHTML=\`<div class="section"><h2>基础配置</h2><div class="setup-form"><input id="cookie" placeholder="BUFF Cookie (登录后从浏览器复制)" value="\${cookie.value||''}"><input id="token" placeholder="PushPlus Token (微信通知)" value="\${token.value||''}"><button onclick="saveConfig()">保存配置</button></div></div>\`;}
+}catch(e){c.innerHTML='<div class="empty">连接失败: '+e.message+'</div>';}}
+async function saveConfig(){const cookie=document.getElementById('cookie').value;const token=document.getElementById('token').value;if(cookie)await fetch(API+'/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:'buff_cookie',value:cookie})});if(token)await fetch(API+'/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:'pushplus_token',value:token})});alert('配置已保存');render();}
+render();setInterval(()=>{if(currentTab==='dashboard')render();},30000);
+</script>
+</body></html>`;
 }
 
 function stopServer() {
