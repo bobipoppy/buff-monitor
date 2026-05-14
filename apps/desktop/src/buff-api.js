@@ -26,6 +26,9 @@ class BuffAPI {
   }
 
   setCookie(cookie) {
+    if (cookie && !cookie.includes('session=')) {
+      cookie = `session=${cookie}`;
+    }
     this.cookie = cookie;
     this.csrfToken = '';
   }
