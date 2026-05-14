@@ -11,6 +11,7 @@ if (!Module.globalPaths.includes(nodeModulesPath)) {
 const { app, BrowserWindow, Tray, Menu, nativeImage, Notification, ipcMain, shell } = require('electron');
 const { startServer, stopServer } = require('./server');
 const { initDatabase } = require('./database');
+const { checkForUpdates, downloadAndInstall, getState: getUpdateState } = require('./updater');
 const Store = require('electron-store');
 
 const store = new Store();
@@ -74,6 +75,8 @@ function createTray() {
     { type: 'separator' },
     { label: '设置', click: () => { showWindow(); mainWindow?.webContents.send('navigate', '/settings'); } },
     { type: 'separator' },
+    { label: '检查更新', click: () => triggerUpdateCheck() },
+    { type: 'separator' },
     { label: '退出', click: () => quitApp() },
   ]);
 
@@ -114,6 +117,7 @@ function setupAppMenu() {
       label: app.name,
       submenu: [
         { role: 'about' },
+        { label: '检查更新...', click: () => triggerUpdateCheck() },
         { type: 'separator' },
         { label: '设置...', accelerator: 'Cmd+,', click: () => { showWindow(); } },
         { type: 'separator' },
@@ -164,6 +168,27 @@ function setupAppMenu() {
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
 
+async function triggerUpdateCheck() {
+  const state = await checkForUpdates(false);
+  if (state.available) {
+    const { response } = await require('electron').dialog.showMessageBox(mainWindow, {
+      type: 'info',
+      title: '发现新版本',
+      message: `BUFF Monitor v${state.latestVersion} 可用`,
+      detail: `当前版本: v${app.getVersion()}\n\n更新内容:\n${state.releaseNotes?.slice(0, 500) || '(无说明)'}`,
+      buttons: ['下载更新', '稍后再说', '打开发布页'],
+      defaultId: 0,
+    });
+    if (response === 0) {
+      downloadAndInstall().catch((err) => {
+        require('electron').dialog.showErrorBox('更新失败', err.message);
+      });
+    } else if (response === 2) {
+      shell.openExternal(`https://github.com/bobipoppy/buff-monitor/releases/latest`);
+    }
+  }
+}
+
 ipcMain.handle('get-config', (_event, key) => {
   return store.get(key);
 });
@@ -188,6 +213,8 @@ app.whenReady().then(async () => {
   setupAppMenu();
   createWindow();
   createTray();
+
+  setTimeout(() => checkForUpdates(true), 10000);
 
   app.on('activate', () => {
     if (mainWindow === null) createWindow();

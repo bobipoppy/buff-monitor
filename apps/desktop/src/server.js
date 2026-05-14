@@ -9,6 +9,7 @@ const { sendWeChatNotification, sendNativeNotification, formatSignalMessage, set
 const { buffAPI } = require('./buff-api');
 const { pricingEngine } = require('./pricing');
 const { autoTrader } = require('./auto-trader');
+const { checkForUpdates, downloadAndInstall, getState: getUpdateState, CURRENT_VERSION } = require('./updater');
 const Store = require('electron-store');
 
 const store = new Store();
@@ -372,6 +373,25 @@ function startServer() {
       if (key === 'buff_cookie') updateCookie(value);
       if (key === 'pushplus_token') setPushPlusToken(value);
       res.json({ success: true });
+    });
+
+    // ============= Update API =============
+    app.get('/api/update/status', (_req, res) => {
+      res.json(getUpdateState());
+    });
+
+    app.post('/api/update/check', async (_req, res) => {
+      try {
+        const state = await checkForUpdates(true);
+        res.json(state);
+      } catch (err) { res.status(500).json({ error: err.message }); }
+    });
+
+    app.post('/api/update/download', async (_req, res) => {
+      try {
+        await downloadAndInstall();
+        res.json({ success: true });
+      } catch (err) { res.status(500).json({ error: err.message }); }
     });
 
     // Catch-all: serve embedded dashboard
@@ -749,9 +769,30 @@ async function render(){
           </div>
         </div>
         <div class="panel" style="margin-top:16px">
+          <div class="panel-header"><span class="panel-title">软件更新</span></div>
+          <div style="padding:22px">
+            <div style="display:flex;align-items:center;justify-content:space-between">
+              <div>
+                <div style="font-size:14px;font-weight:500">当前版本: v${CURRENT_VERSION}</div>
+                <div id="update-status" style="font-size:12px;color:var(--text-muted);margin-top:4px">点击检查是否有新版本</div>
+              </div>
+              <div style="display:flex;gap:8px">
+                <button class="btn btn-primary" id="btn-check-update" onclick="checkUpdate()">检查更新</button>
+                <button class="btn btn-ghost" id="btn-download-update" style="display:none" onclick="downloadUpdate()">下载安装</button>
+              </div>
+            </div>
+            <div id="update-progress" style="display:none;margin-top:12px">
+              <div style="height:4px;background:var(--border);border-radius:2px;overflow:hidden">
+                <div id="progress-bar" style="height:100%;background:var(--accent);width:0%;transition:width 0.3s"></div>
+              </div>
+              <div id="progress-text" style="font-size:11px;color:var(--text-muted);margin-top:4px">下载中...</div>
+            </div>
+          </div>
+        </div>
+        <div class="panel" style="margin-top:16px">
           <div class="panel-header"><span class="panel-title">关于</span></div>
           <div style="padding:22px;color:var(--text-muted);font-size:13px;line-height:1.8">
-            <div>BUFF Monitor v1.0.0</div>
+            <div>BUFF Monitor v${CURRENT_VERSION}</div>
             <div>网易 BUFF 饰品价格监控与交易信号分析工具</div>
             <div style="margin-top:8px">技术栈：Electron + Express + SQLite + 技术分析算法</div>
           </div>
@@ -776,6 +817,39 @@ async function testConfig(){
     if(r.ok)showToast('连接正常');
     else showToast('连接异常');
   }catch(e){showToast('连接失败: '+e.message);}
+}
+
+async function checkUpdate(){
+  const btn=document.getElementById('btn-check-update');
+  const status=document.getElementById('update-status');
+  btn.textContent='检查中...';btn.disabled=true;
+  try{
+    const r=await fetch(API+'/update/check',{method:'POST'}).then(r=>r.json());
+    if(r.available){
+      status.innerHTML='<span style="color:var(--green)">发现新版本 v'+r.latestVersion+'</span>';
+      document.getElementById('btn-download-update').style.display='inline-flex';
+      btn.textContent='检查更新';btn.disabled=false;
+    }else{
+      status.textContent='已是最新版本 (v'+(r.latestVersion||r.currentVersion)+')';
+      btn.textContent='检查更新';btn.disabled=false;
+    }
+  }catch(e){status.textContent='检查失败: '+e.message;btn.textContent='重试';btn.disabled=false;}
+}
+async function downloadUpdate(){
+  const btn=document.getElementById('btn-download-update');
+  const prog=document.getElementById('update-progress');
+  const bar=document.getElementById('progress-bar');
+  const txt=document.getElementById('progress-text');
+  btn.style.display='none';prog.style.display='block';
+  try{
+    const poll=setInterval(async()=>{
+      const s=await fetch(API+'/update/status').then(r=>r.json());
+      bar.style.width=s.progress+'%';
+      txt.textContent=s.progress>=100?'下载完成，准备安装...':'下载中 '+s.progress+'%';
+      if(!s.downloading&&s.progress>=100)clearInterval(poll);
+    },500);
+    await fetch(API+'/update/download',{method:'POST'});
+  }catch(e){txt.textContent='下载失败: '+e.message;btn.style.display='inline-flex';}
 }
 
 async function toggleAutoTrader(enable){
