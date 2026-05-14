@@ -1,0 +1,67 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: buff-postgres
+    environment:
+      POSTGRES_USER: buff
+      POSTGRES_PASSWORD: buff123
+      POSTGRES_DB: buff_monitor
+    ports:
+      - '5432:5432'
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U buff -d buff_monitor']
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: buff-redis
+    ports:
+      - '6379:6379'
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  server:
+    build:
+      context: .
+      dockerfile: apps/server/Dockerfile
+    container_name: buff-server
+    environment:
+      DATABASE_URL: postgresql://buff:buff123@postgres:5432/buff_monitor
+      REDIS_URL: redis://redis:6379
+      BUFF_COOKIE: ${BUFF_COOKIE}
+      PUSHPLUS_TOKEN: ${PUSHPLUS_TOKEN}
+      SERVER_PORT: 3001
+    ports:
+      - '3001:3001'
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    container_name: buff-web
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:3001
+    ports:
+      - '3000:3000'
+    depends_on:
+      - server
+
+volumes:
+  postgres_data:
+  redis_data:

@@ -1,0 +1,18 @@
+{
+  "name": "buff-monitor",
+  "version": "1.0.0",
+  "private": true,
+  "description": "BUFF饰品价格监控系统",
+  "scripts": {
+    "dev:server": "pnpm --filter @buff-monitor/server dev",
+    "dev:web": "pnpm --filter @buff-monitor/web dev",
+    "build": "pnpm -r build",
+    "lint": "pnpm -r lint",
+    "db:migrate": "pnpm --filter @buff-monitor/server db:migrate",
+    "db:seed": "pnpm --filter @buff-monitor/server db:seed"
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "pnpm": ">=8.0.0"
+  }
+}

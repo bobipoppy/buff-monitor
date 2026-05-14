@@ -1,0 +1,50 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: #0f0f1a;
+  --foreground: #e4e4e7;
+  --card: #1a1a2e;
+  --card-hover: #1e1e36;
+  --border: #2a2a4a;
+  --accent: #6366f1;
+  --green: #00d084;
+  --red: #e94560;
+  --gold: #ffd93d;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+}
+
+@layer components {
+  .card {
+    @apply rounded-xl border border-[var(--border)] bg-[var(--card)] p-6 transition-colors hover:bg-[var(--card-hover)];
+  }
+
+  .btn-primary {
+    @apply rounded-lg bg-[var(--accent)] px-4 py-2 font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-50;
+  }
+
+  .btn-secondary {
+    @apply rounded-lg border border-[var(--border)] px-4 py-2 font-medium text-[var(--foreground)] transition-colors hover:bg-[var(--card-hover)];
+  }
+
+  .input {
+    @apply rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-[var(--foreground)] outline-none focus:border-[var(--accent)];
+  }
+
+  .badge-green {
+    @apply inline-flex items-center rounded-full bg-emerald-500/20 px-2 py-0.5 text-xs font-medium text-emerald-400;
+  }
+
+  .badge-red {
+    @apply inline-flex items-center rounded-full bg-red-500/20 px-2 py-0.5 text-xs font-medium text-red-400;
+  }
+
+  .badge-yellow {
+    @apply inline-flex items-center rounded-full bg-yellow-500/20 px-2 py-0.5 text-xs font-medium text-yellow-400;
+  }
+}
