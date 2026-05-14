@@ -34,7 +34,8 @@ fi
 
 # 5. 重新生成 DMG
 echo "=== Regenerating DMG... ==="
-DMG_PATH="dist/BUFF Monitor-1.0.0-arm64.dmg"
+VERSION=$(node -p "require('./package.json').version")
+DMG_PATH="dist/BUFF Monitor-${VERSION}-arm64.dmg"
 rm -f "$DMG_PATH"
 hdiutil create -volname "BUFF Monitor" -srcfolder "dist/mac-arm64/BUFF Monitor.app" -ov -format UDZO "$DMG_PATH"
 
