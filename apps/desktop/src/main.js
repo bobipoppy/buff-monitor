@@ -1,9 +1,12 @@
 const path = require('path');
+const Module = require('module');
 
-// 确保在打包环境中能找到所有依赖
+// 打包后 node_modules 在 app 根目录，确保子模块能正确解析
 const appRoot = path.join(__dirname, '..');
-const prodModulesPath = path.join(appRoot, 'node_modules_prod', 'node_modules');
-require('module').globalPaths.unshift(prodModulesPath);
+const nodeModulesPath = path.join(appRoot, 'node_modules');
+if (!Module.globalPaths.includes(nodeModulesPath)) {
+  Module.globalPaths.unshift(nodeModulesPath);
+}
 
 const { app, BrowserWindow, Tray, Menu, nativeImage, Notification, ipcMain, shell } = require('electron');
 const { spawn } = require('child_process');
