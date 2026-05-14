@@ -2,11 +2,14 @@
   "name": "buff-monitor",
   "version": "1.0.0",
   "private": true,
-  "description": "BUFF饰品价格监控系统",
+  "description": "BUFF饰品价格监控系统 - Mac桌面版",
   "scripts": {
     "dev:server": "pnpm --filter @buff-monitor/server dev",
     "dev:web": "pnpm --filter @buff-monitor/web dev",
+    "dev:desktop": "pnpm --filter @buff-monitor/desktop dev",
     "build": "pnpm -r build",
+    "build:web": "pnpm --filter @buff-monitor/web build",
+    "build:desktop": "pnpm build:web && pnpm --filter @buff-monitor/desktop build:mac",
     "lint": "pnpm -r lint",
     "db:migrate": "pnpm --filter @buff-monitor/server db:migrate",
     "db:seed": "pnpm --filter @buff-monitor/server db:seed"

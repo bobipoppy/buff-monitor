@@ -1,0 +1,56 @@
+{
+  "name": "@buff-monitor/desktop",
+  "version": "1.0.0",
+  "private": true,
+  "main": "src/main.js",
+  "scripts": {
+    "postinstall": "npx --package=@electron/rebuild@3.6.0 -- electron-rebuild -f -w better-sqlite3",
+    "dev": "electron .",
+    "build": "electron-builder",
+    "build:mac": "electron-builder --mac"
+  },
+  "dependencies": {
+    "@buff-monitor/shared": "workspace:*",
+    "better-sqlite3": "^11.0.0",
+    "cors": "^2.8.5",
+    "electron-store": "^8.2.0",
+    "express": "^4.18.0",
+    "node-cron": "^3.0.3"
+  },
+  "devDependencies": {
+    "@electron/rebuild": "^4.0.4",
+    "electron": "^30.0.0",
+    "electron-builder": "^24.13.0"
+  },
+  "build": {
+    "appId": "com.buff-monitor.app",
+    "productName": "BUFF Monitor",
+    "mac": {
+      "category": "public.app-category.finance",
+      "icon": "assets/icon.svg",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64"
+          ]
+        }
+      ]
+    },
+    "files": [
+      "src/**/*",
+      "assets/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "../web/.next/standalone",
+        "to": "nextjs"
+      },
+      {
+        "from": "../web/.next/static",
+        "to": "nextjs/apps/web/.next/static"
+      }
+    ],
+    "asar": true
+  }
+}

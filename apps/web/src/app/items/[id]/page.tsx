@@ -7,7 +7,7 @@ import PriceChart from '@/components/PriceChart';
 
 export default function ItemDetailPage() {
   const params = useParams();
-  const id = Number(params.id);
+  const id = Number(params?.id);
   const [item, setItem] = useState<ItemData | null>(null);
   const [prices, setPrices] = useState<PriceData[]>([]);
   const [analysis, setAnalysis] = useState<AnalysisData | null>(null);
