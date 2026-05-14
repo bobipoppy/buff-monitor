@@ -57,6 +57,7 @@ class BuffAPI {
             'User-Agent': getRandomUA(),
             Referer: BUFF_BASE_URL,
             Accept: 'application/json',
+            'Accept-Language': 'zh-CN,zh;q=0.9',
           },
         });
 
@@ -104,6 +105,7 @@ class BuffAPI {
             Cookie: this.cookie,
             'User-Agent': getRandomUA(),
             'Content-Type': 'application/json',
+            'Accept-Language': 'zh-CN,zh;q=0.9',
             'X-CSRFToken': this.csrfToken,
             'X-Requested-With': 'XMLHttpRequest',
             Referer: BUFF_BASE_URL + '/market/',
@@ -178,8 +180,10 @@ class BuffAPI {
     return this._get('/api/market/search/suggest', { text: keyword, game });
   }
 
-  async getMarketGoods(game = 'csgo', page = 1, pageSize = 80) {
-    return this._get('/api/market/goods', { game, page_num: page, page_size: pageSize });
+  async getMarketGoods(game = 'csgo', page = 1, pageSize = 80, categoryGroup = '') {
+    const params = { game, page_num: page, page_size: pageSize };
+    if (categoryGroup) params.category_group = categoryGroup;
+    return this._get('/api/market/goods', params);
   }
 
   async getSellOrders(goodsId, page = 1, sortBy = 'default', game = 'csgo') {

@@ -4,7 +4,7 @@ const path = require('path');
 const { app: electronApp } = require('electron');
 const { getDb } = require('./database');
 const { analyzeItem } = require('./analysis');
-const { startCrawler, stopCrawler, pauseCrawler, resumeCrawler, updateCookie, crawlMarketPage, crawlItemPrice, fullMarketScan, getScanStatus, categorizeItem } = require('./crawler');
+const { startCrawler, stopCrawler, pauseCrawler, resumeCrawler, updateCookie, crawlMarketPage, crawlItemPrice, fullMarketScan, stopFullScan, getScanStatus, extractCategory } = require('./crawler');
 const { sendWeChatNotification, sendNativeNotification, formatSignalMessage, setPushPlusToken } = require('./notification');
 const { buffAPI } = require('./buff-api');
 const { pricingEngine } = require('./pricing');
@@ -76,12 +76,17 @@ function startServer() {
       const { game = 'csgo', pages, full } = req.body;
       if (full) {
         fullMarketScan(game);
-        res.json({ message: 'Full market scan started' });
+        res.json({ message: '全量扫描已启动（按分类并发）' });
       } else {
         const p = pages || 5;
         for (let i = 1; i <= p; i++) { crawlMarketPage(game, i); }
-        res.json({ message: `Scan started: ${game}, ${p} pages` });
+        res.json({ message: `快速扫描: ${p} 页` });
       }
+    });
+
+    app.post('/api/items/scan-stop', (_req, res) => {
+      stopFullScan();
+      res.json({ message: '扫描已停止' });
     });
 
     app.get('/api/items/scan-status', (_req, res) => {
@@ -454,13 +459,11 @@ function startServer() {
 
       try {
         const db = getDb();
-        const uncategorized = db.prepare(`SELECT id, name FROM items WHERE category IS NULL OR category = ''`).all();
-        if (uncategorized.length) {
-          const stmt = db.prepare('UPDATE items SET category = ? WHERE id = ?');
-          db.transaction(() => { for (const item of uncategorized) stmt.run(categorizeItem(item.name), item.id); })();
-          console.log(`[Server] Categorized ${uncategorized.length} items`);
+        const uncategorized = db.prepare(`SELECT COUNT(*) as c FROM items WHERE category IS NULL OR category = ''`).get();
+        if (uncategorized.c > 0) {
+          console.log(`[Server] ${uncategorized.c} items without category, will be updated on next scan`);
         }
-      } catch (e) { console.error('[Server] Category migration error:', e.message); }
+      } catch (e) { console.error('[Server] DB check error:', e.message); }
 
       resolve(port);
     });
@@ -575,6 +578,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","SF Pro Text"
 .welcome-icon svg{width:36px;height:36px;color:var(--accent-light)}
 .welcome h2{font-size:18px;margin-bottom:8px}
 .welcome p{color:var(--text-muted);font-size:14px;line-height:1.6;max-width:400px;margin:0 auto}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.85}}
 </style>
 </head>
 <body>
@@ -666,23 +670,37 @@ async function render(){
     else if(currentTab==='items'){
       const cats=await fetch(API+'/items/categories').then(r=>r.json());
       const scanSt=await fetch(API+'/items/scan-status').then(r=>r.json());
-      const catLabels={rifle:'步枪',pistol:'手枪',sniper:'狙击枪',smg:'微冲',shotgun:'霰弹枪',machinegun:'机枪',knife:'刀',gloves:'手套',sticker:'贴纸',patch:'布章',music_kit:'音乐盒',graffiti:'涂鸦',case:'箱子/胶囊',key:'钥匙',agent:'特工',collectible:'收藏品',other:'其他'};
 
       c.innerHTML=\`
         <div class="page-title">监控列表 <span class="badge" id="items-total">加载中...</span></div>
+
+        <div id="scan-progress" style="display:\${scanSt.running?'block':'none'};margin-bottom:16px;padding:14px 18px;background:var(--bg-card);border:1px solid var(--border-active);border-radius:var(--radius);animation:pulse 2s infinite">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+            <span style="font-size:13px;font-weight:600;color:var(--accent-light)" id="scan-phase">\${scanSt.phase||'准备中...'}</span>
+            <button onclick="stopScan()" style="padding:4px 12px;border-radius:6px;border:1px solid var(--red);background:transparent;color:var(--red);cursor:pointer;font-size:12px">停止扫描</button>
+          </div>
+          <div style="background:var(--bg-primary);border-radius:4px;height:6px;overflow:hidden">
+            <div id="scan-bar" style="height:100%;background:var(--accent);border-radius:4px;transition:width .3s;width:\${scanSt.groupsTotal?(scanSt.groupsDone/scanSt.groupsTotal*100):0}%"></div>
+          </div>
+          <div style="display:flex;justify-content:space-between;margin-top:6px;font-size:12px;color:var(--text-muted)">
+            <span>正在扫描: <strong id="scan-group">\${scanSt.currentGroup||'...'}</strong></span>
+            <span>分类 <span id="scan-gd">\${scanSt.groupsDone||0}</span>/\${scanSt.groupsTotal||0} · 已获取 <strong id="scan-total">\${scanSt.totalItems||0}</strong> 件</span>
+          </div>
+        </div>
+
         <div class="items-toolbar" style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap;align-items:center">
-          <input id="items-search" type="text" placeholder="搜索商品名称..." style="flex:1;min-width:180px;padding:8px 12px;border:1px solid var(--border);border-radius:8px;background:var(--card);color:var(--text);font-size:13px"/>
-          <select id="items-cat" style="padding:8px 12px;border:1px solid var(--border);border-radius:8px;background:var(--card);color:var(--text);font-size:13px">
-            <option value="">全部分类</option>
-            \${cats.map(ct=>\`<option value="\${ct.category}">\${catLabels[ct.category]||ct.category} (\${ct.count})</option>\`).join('')}
+          <input id="items-search" type="text" placeholder="搜索商品名称..." style="flex:1;min-width:180px;padding:8px 12px;border:1px solid var(--border);border-radius:8px;background:var(--bg-card);color:var(--text-primary);font-size:13px"/>
+          <select id="items-cat" style="padding:8px 12px;border:1px solid var(--border);border-radius:8px;background:var(--bg-card);color:var(--text-primary);font-size:13px">
+            <option value="">全部分类 (\${cats.reduce((a,c)=>a+c.count,0)})</option>
+            \${cats.map(ct=>\`<option value="\${ct.category}">\${ct.category} (\${ct.count})</option>\`).join('')}
           </select>
-          <select id="items-priority" style="padding:8px 12px;border:1px solid var(--border);border-radius:8px;background:var(--card);color:var(--text);font-size:13px">
+          <select id="items-priority" style="padding:8px 12px;border:1px solid var(--border);border-radius:8px;background:var(--bg-card);color:var(--text-primary);font-size:13px">
             <option value="">全部状态</option>
             <option value="high">高优先监控</option>
             <option value="normal">普通监控</option>
             <option value="none">未监控</option>
           </select>
-          <button onclick="startFullScan()" style="padding:8px 16px;border-radius:8px;border:none;background:var(--accent);color:#fff;cursor:pointer;font-size:13px;white-space:nowrap">\${scanSt.running?'扫描中...':'全量扫描'}</button>
+          <button id="scan-btn" onclick="startFullScan()" style="padding:8px 16px;border-radius:8px;border:none;background:var(--accent);color:#fff;cursor:pointer;font-size:13px;white-space:nowrap">\${scanSt.running?'扫描中...':'全量扫描'}</button>
         </div>
 
         <div class="batch-bar" id="batch-bar" style="display:none;padding:10px 16px;background:var(--accent);color:#fff;border-radius:8px;margin-bottom:12px;align-items:center;gap:8px;flex-wrap:wrap">
@@ -693,13 +711,12 @@ async function render(){
           <button onclick="clearSelection()" style="padding:4px 12px;border-radius:6px;border:1px solid rgba(255,255,255,.4);background:transparent;color:#fff;cursor:pointer;font-size:12px;margin-left:auto">取消选择</button>
         </div>
 
-        <div class="panel"><div class="panel-body" id="items-list" style="max-height:calc(100vh - 280px);overflow-y:auto"></div></div>
+        <div class="panel"><div class="panel-body" id="items-list" style="max-height:calc(100vh - 320px);overflow-y:auto"></div></div>
         <div style="display:flex;justify-content:center;gap:8px;margin-top:12px" id="items-pager"></div>
       \`;
 
       window._selectedItems=new Set();
       window._itemsPage=1;
-      window._itemsData=[];
 
       async function loadItems(page=1){
         const search=document.getElementById('items-search')?.value||'';
@@ -707,10 +724,9 @@ async function render(){
         const pri=document.getElementById('items-priority')?.value||'';
         let url=API+'/items?page='+page+'&limit=50';
         if(search)url+='&search='+encodeURIComponent(search);
-        if(cat)url+='&category='+cat;
+        if(cat)url+='&category='+encodeURIComponent(cat);
         if(pri)url+='&priority='+pri;
         const r=await fetch(url).then(r=>r.json());
-        window._itemsData=r.items;
         window._itemsPage=page;
         document.getElementById('items-total').textContent=r.total+' 项';
         const list=document.getElementById('items-list');
@@ -718,16 +734,15 @@ async function render(){
           list.innerHTML='<div class="panel-empty" style="padding:40px;text-align:center;color:var(--text-muted)"><div>暂无商品</div><div style="margin-top:8px;font-size:13px">点击「全量扫描」获取 BUFF 全部 CS2 商品</div></div>';
         } else {
           list.innerHTML=\`<div style="display:flex;align-items:center;padding:6px 12px;border-bottom:1px solid var(--border);font-size:12px;color:var(--text-muted)">
-            <label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" id="select-all" onchange="toggleSelectAll(this.checked)" style="width:16px;height:16px;cursor:pointer"/> 全选</label>
-            <span style="margin-left:auto">\${r.items.length}/\${r.total}</span>
+            <label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" id="select-all" onchange="toggleSelectAll(this.checked)" style="width:16px;height:16px;cursor:pointer"/> 全选本页</label>
+            <span style="margin-left:auto">第 \${page} 页 · 显示 \${r.items.length}/\${r.total}</span>
           </div>\`+r.items.map(i=>{
             const priLabel=i.watch_priority==='high'?'<span style="color:var(--red);font-weight:600">●</span> 高优先':i.watch_priority==='normal'?'<span style="color:var(--accent);font-weight:600">●</span> 监控中':'<span style="color:var(--text-muted)">○</span> 未监控';
-            const catLabel=catLabels[i.category]||i.category||'未分类';
             return \`<div class="list-item" style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-bottom:1px solid var(--border);transition:background .15s" onmouseenter="this.style.background='var(--bg-card-hover)'" onmouseleave="this.style.background='transparent'">
               <input type="checkbox" class="item-cb" data-id="\${i.id}" onchange="onItemCheck()" style="width:16px;height:16px;cursor:pointer;flex-shrink:0" \${window._selectedItems.has(i.id)?'checked':''}/>
               <div style="flex:1;min-width:0">
                 <div style="font-size:14px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">\${i.name}</div>
-                <div style="font-size:12px;color:var(--text-muted);margin-top:2px">\${priLabel} · \${catLabel} · 在售 \${i.sell_count||0}</div>
+                <div style="font-size:12px;color:var(--text-muted);margin-top:2px">\${priLabel} · \${i.category||'未分类'} · 在售 \${i.sell_count||0}</div>
               </div>
               <div style="text-align:right;flex-shrink:0">
                 <div style="font-size:15px;font-weight:600">¥\${i.buff_min_price||'--'}</div>
@@ -744,9 +759,12 @@ async function render(){
         const pager=document.getElementById('items-pager');
         if(totalPages>1){
           let btns='';
-          if(page>1) btns+=\`<button onclick="loadItems(\${page-1})" style="padding:6px 12px;border:1px solid var(--border);border-radius:6px;background:var(--card);color:var(--text);cursor:pointer">上一页</button>\`;
-          btns+=\`<span style="padding:6px 12px;color:var(--text-muted)">\${page}/\${totalPages}</span>\`;
-          if(page<totalPages) btns+=\`<button onclick="loadItems(\${page+1})" style="padding:6px 12px;border:1px solid var(--border);border-radius:6px;background:var(--card);color:var(--text);cursor:pointer">下一页</button>\`;
+          const start=Math.max(1,page-3),end=Math.min(totalPages,page+3);
+          if(page>1) btns+=\`<button onclick="loadItems(\${page-1})" style="padding:6px 12px;border:1px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text-primary);cursor:pointer">‹ 上一页</button>\`;
+          if(start>1) btns+=\`<button onclick="loadItems(1)" style="padding:6px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text-primary);cursor:pointer">1</button><span style="padding:0 4px;color:var(--text-muted)">...</span>\`;
+          for(let p=start;p<=end;p++) btns+=\`<button onclick="loadItems(\${p})" style="padding:6px 10px;border:1px solid \${p===page?'var(--accent)':'var(--border)'};border-radius:6px;background:\${p===page?'var(--accent)':'var(--bg-card)'};color:\${p===page?'#fff':'var(--text-primary)'};cursor:pointer;font-weight:\${p===page?'600':'400'}">\${p}</button>\`;
+          if(end<totalPages) btns+=\`<span style="padding:0 4px;color:var(--text-muted)">...</span><button onclick="loadItems(\${totalPages})" style="padding:6px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text-primary);cursor:pointer">\${totalPages}</button>\`;
+          if(page<totalPages) btns+=\`<button onclick="loadItems(\${page+1})" style="padding:6px 12px;border:1px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text-primary);cursor:pointer">下一页 ›</button>\`;
           pager.innerHTML=btns;
         } else pager.innerHTML='';
       }
@@ -786,13 +804,38 @@ async function render(){
         await fetch(API+'/items/batch-watch',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ids:[id],priority:pri})});
         loadItems(window._itemsPage);
       };
+      window.stopScan=async function(){
+        await fetch(API+'/items/scan-stop',{method:'POST'});
+        document.getElementById('scan-progress').style.display='none';
+        document.getElementById('scan-btn').disabled=false;
+        document.getElementById('scan-btn').textContent='全量扫描';
+        loadItems(1);
+        const cats2=await fetch(API+'/items/categories').then(r=>r.json());
+        const sel=document.getElementById('items-cat');
+        sel.innerHTML='<option value="">全部分类 ('+cats2.reduce((a,c)=>a+c.count,0)+')</option>'+cats2.map(ct=>'<option value="'+ct.category+'">'+ct.category+' ('+ct.count+')</option>').join('');
+      };
       window.startFullScan=async function(){
-        const btn=event.target;btn.disabled=true;btn.textContent='扫描中...';
+        const btn=document.getElementById('scan-btn');btn.disabled=true;btn.textContent='扫描中...';
+        document.getElementById('scan-progress').style.display='block';
         await fetch(API+'/items/scan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({full:true})});
         const poll=setInterval(async()=>{
           const st=await fetch(API+'/items/scan-status').then(r=>r.json());
-          if(!st.running){clearInterval(poll);btn.disabled=false;btn.textContent='全量扫描';loadItems(1);}
-        },5000);
+          document.getElementById('scan-phase').textContent=st.phase||'扫描中...';
+          document.getElementById('scan-group').textContent=st.currentGroup||'...';
+          document.getElementById('scan-gd').textContent=st.groupsDone||0;
+          document.getElementById('scan-total').textContent=st.totalItems||0;
+          const pct=st.groupsTotal?(st.groupsDone/st.groupsTotal*100):0;
+          document.getElementById('scan-bar').style.width=pct+'%';
+          if(!st.running){
+            clearInterval(poll);
+            btn.disabled=false;btn.textContent='全量扫描';
+            document.getElementById('scan-progress').style.display='none';
+            loadItems(1);
+            const cats2=await fetch(API+'/items/categories').then(r=>r.json());
+            const sel=document.getElementById('items-cat');
+            sel.innerHTML='<option value="">全部分类 ('+cats2.reduce((a,c)=>a+c.count,0)+')</option>'+cats2.map(ct=>'<option value="'+ct.category+'">'+ct.category+' ('+ct.count+')</option>').join('');
+          }
+        },3000);
       };
 
       let debounceTimer;

@@ -41,47 +41,59 @@ async function crawlItemPrice(goodsId) {
   }
 }
 
-const WEAPON_CATEGORIES = {
-  'AK-47': 'rifle', 'M4A4': 'rifle', 'M4A1-S': 'rifle', 'AWP': 'sniper',
-  'Galil AR': 'rifle', 'FAMAS': 'rifle', 'SG 553': 'rifle', 'AUG': 'rifle',
-  'SSG 08': 'sniper', 'SCAR-20': 'sniper', 'G3SG1': 'sniper',
-  'MAC-10': 'smg', 'MP9': 'smg', 'MP7': 'smg', 'MP5-SD': 'smg',
-  'UMP-45': 'smg', 'P90': 'smg', 'PP-Bizon': 'smg',
-  'Nova': 'shotgun', 'XM1014': 'shotgun', 'MAG-7': 'shotgun', 'Sawed-Off': 'shotgun',
-  'M249': 'machinegun', 'Negev': 'machinegun',
-  'Desert Eagle': 'pistol', 'R8 Revolver': 'pistol', 'USP-S': 'pistol',
-  'P2000': 'pistol', 'Glock-18': 'pistol', 'P250': 'pistol',
-  'Five-SeveN': 'pistol', 'Tec-9': 'pistol', 'CZ75-Auto': 'pistol',
-  'Dual Berettas': 'pistol',
-  'Bayonet': 'knife', 'Karambit': 'knife', 'M9 Bayonet': 'knife',
-  'Butterfly Knife': 'knife', 'Flip Knife': 'knife', 'Gut Knife': 'knife',
-  'Falchion Knife': 'knife', 'Shadow Daggers': 'knife', 'Bowie Knife': 'knife',
-  'Huntsman Knife': 'knife', 'Navaja Knife': 'knife', 'Stiletto Knife': 'knife',
-  'Talon Knife': 'knife', 'Ursus Knife': 'knife', 'Classic Knife': 'knife',
-  'Paracord Knife': 'knife', 'Survival Knife': 'knife', 'Nomad Knife': 'knife',
-  'Skeleton Knife': 'knife', 'Kukri Knife': 'knife',
-};
+const BUFF_CATEGORY_GROUPS = [
+  { group: 'rifle',     label: '步枪' },
+  { group: 'pistol',    label: '手枪' },
+  { group: 'smg',       label: '微型冲锋枪' },
+  { group: 'shotgun',   label: '霰弹枪' },
+  { group: 'machinegun', label: '机枪' },
+  { group: 'knife',     label: '刀' },
+  { group: 'hands',     label: '手套' },
+  { group: 'sticker',   label: '贴纸' },
+  { group: 'other',     label: '其他' },
+  { group: 'type_customplayer', label: '特工' },
+];
 
-function categorizeItem(name) {
-  if (!name) return 'other';
-  const lower = name.toLowerCase();
+function extractCategory(item) {
+  const tags = item.goods_info?.info?.tags || {};
+  const typeName = tags.type?.localized_name || '';
+  const catName = tags.category?.localized_name || '';
 
-  if (lower.includes('gloves') || lower.includes('wraps') || lower.includes('hand wraps')) return 'gloves';
-  if (lower.includes('sticker')) return 'sticker';
-  if (lower.includes('patch')) return 'patch';
-  if (lower.includes('music kit')) return 'music_kit';
-  if (lower.includes('graffiti')) return 'graffiti';
-  if (lower.includes('key') && !lower.includes('monkey')) return 'key';
-  if (lower.includes('case') || lower.includes('capsule')) return 'case';
-  if (lower.includes('agent') || lower.includes('operator')) return 'agent';
-  if (lower.includes('pin') || lower.includes('collectible')) return 'collectible';
+  if (typeName) return typeName;
+  if (catName) return catName;
+  return '其他';
+}
 
-  for (const [weapon, cat] of Object.entries(WEAPON_CATEGORIES)) {
-    if (name.includes(weapon)) return cat;
-  }
+function upsertItems(items, game) {
+  const db = getDb();
+  const upsert = db.prepare(`
+    INSERT INTO items (goods_id, name, game, category, image_url, steam_price, buff_min_price, sell_count)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT (goods_id) DO UPDATE SET
+      name = excluded.name,
+      buff_min_price = excluded.buff_min_price,
+      sell_count = excluded.sell_count,
+      steam_price = excluded.steam_price,
+      category = excluded.category,
+      image_url = COALESCE(excluded.image_url, items.image_url),
+      updated_at = datetime('now')
+  `);
 
-  if (lower.includes('knife') || lower.includes('dagger') || lower.includes('sword')) return 'knife';
-  return 'other';
+  db.transaction(() => {
+    for (const item of items) {
+      const category = extractCategory(item);
+      upsert.run(
+        item.id,
+        item.short_name || item.name,
+        game,
+        category,
+        item.goods_info?.icon_url || '',
+        parseFloat(item.goods_info?.steam_price_cny) || null,
+        parseFloat(item.sell_min_price),
+        item.sell_num
+      );
+    }
+  })();
 }
 
 async function crawlMarketPage(game = 'csgo', page = 1) {
@@ -89,36 +101,7 @@ async function crawlMarketPage(game = 'csgo', page = 1) {
 
   try {
     const data = await buffAPI.getMarketGoods(game, page);
-    const db = getDb();
-
-    const upsert = db.prepare(`
-      INSERT INTO items (goods_id, name, game, category, image_url, steam_price, buff_min_price, sell_count)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT (goods_id) DO UPDATE SET
-        buff_min_price = excluded.buff_min_price,
-        sell_count = excluded.sell_count,
-        steam_price = excluded.steam_price,
-        category = COALESCE(excluded.category, items.category),
-        updated_at = datetime('now')
-    `);
-
-    const insertMany = db.transaction((items) => {
-      for (const item of items) {
-        const category = categorizeItem(item.name);
-        upsert.run(
-          item.id,
-          item.name,
-          game,
-          category,
-          item.goods_info?.icon_url || '',
-          parseFloat(item.goods_info?.steam_price_cny) || null,
-          parseFloat(item.sell_min_price),
-          item.sell_num
-        );
-      }
-    });
-
-    insertMany(data.items || []);
+    upsertItems(data.items || [], game);
     console.log(`[Crawler] Market page ${page}: ${data.items?.length || 0} items`);
     return data.total_page;
   } catch (err) {
@@ -128,66 +111,94 @@ async function crawlMarketPage(game = 'csgo', page = 1) {
 }
 
 let fullScanRunning = false;
+let scanProgress = { running: false, phase: '', currentGroup: '', groupsDone: 0, groupsTotal: 0, pagesDone: 0, pagesTotal: 0, totalItems: 0 };
+
+async function scanCategoryGroup(group, label, game, concurrencyDelay) {
+  let page = 1;
+  let totalPages = 1;
+  let groupItems = 0;
+
+  while (page <= totalPages && !crawlerPaused && fullScanRunning) {
+    try {
+      const data = await buffAPI.getMarketGoods(game, page, 80, group);
+      if (!data?.items?.length) break;
+
+      totalPages = data.total_page || 1;
+      upsertItems(data.items, game);
+      groupItems += data.items.length;
+
+      scanProgress.pagesDone++;
+      scanProgress.totalItems += data.items.length;
+      scanProgress.currentGroup = label;
+
+      console.log(`[Scan] ${label}: ${page}/${totalPages} (+${data.items.length})`);
+      page++;
+
+      await new Promise(r => setTimeout(r, concurrencyDelay + Math.random() * 1000));
+    } catch (err) {
+      if (err.message?.includes('429') || err.message?.includes('频繁')) {
+        console.warn(`[Scan] ${label}: rate limited, waiting 10s...`);
+        await new Promise(r => setTimeout(r, 10000));
+      } else {
+        console.error(`[Scan] ${label} page ${page} error:`, err.message);
+        page++;
+        await new Promise(r => setTimeout(r, 3000));
+      }
+    }
+  }
+
+  return groupItems;
+}
 
 async function fullMarketScan(game = 'csgo') {
   if (fullScanRunning || crawlerPaused) return { status: 'busy' };
   fullScanRunning = true;
-  console.log('[Crawler] Full market scan started...');
 
-  let page = 1;
-  let totalPages = 1;
+  const groups = BUFF_CATEGORY_GROUPS;
+  scanProgress = {
+    running: true, phase: '扫描中', currentGroup: '',
+    groupsDone: 0, groupsTotal: groups.length,
+    pagesDone: 0, pagesTotal: 0, totalItems: 0,
+  };
+
+  console.log(`[Scan] Full market scan started: ${groups.length} category groups`);
   let totalItems = 0;
 
   try {
-    while (page <= totalPages && !crawlerPaused) {
-      const data = await buffAPI.getMarketGoods(game, page, 80);
-      if (!data?.items?.length) break;
+    const CONCURRENCY = 2;
+    for (let i = 0; i < groups.length; i += CONCURRENCY) {
+      if (crawlerPaused || !fullScanRunning) break;
 
-      totalPages = data.total_page || 1;
-      const db = getDb();
+      const batch = groups.slice(i, i + CONCURRENCY);
+      const promises = batch.map((g, idx) =>
+        scanCategoryGroup(g.group, g.label, game, 2000 + idx * 500)
+      );
 
-      const upsert = db.prepare(`
-        INSERT INTO items (goods_id, name, game, category, image_url, steam_price, buff_min_price, sell_count)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT (goods_id) DO UPDATE SET
-          buff_min_price = excluded.buff_min_price,
-          sell_count = excluded.sell_count,
-          steam_price = excluded.steam_price,
-          category = COALESCE(excluded.category, items.category),
-          updated_at = datetime('now')
-      `);
-
-      db.transaction(() => {
-        for (const item of data.items) {
-          const category = categorizeItem(item.name);
-          upsert.run(
-            item.id, item.name, game, category,
-            item.goods_info?.icon_url || '',
-            parseFloat(item.goods_info?.steam_price_cny) || null,
-            parseFloat(item.sell_min_price),
-            item.sell_num
-          );
-        }
-      })();
-
-      totalItems += data.items.length;
-      console.log(`[Crawler] Full scan: page ${page}/${totalPages}, total ${totalItems} items`);
-      page++;
-
-      await new Promise((r) => setTimeout(r, 3000 + Math.random() * 2000));
+      const results = await Promise.all(promises);
+      totalItems += results.reduce((a, b) => a + b, 0);
+      scanProgress.groupsDone += batch.length;
+      scanProgress.phase = `已完成 ${scanProgress.groupsDone}/${groups.length} 分类`;
     }
   } catch (err) {
-    console.error('[Crawler] Full scan error:', err.message);
+    console.error('[Scan] Fatal error:', err.message);
   } finally {
     fullScanRunning = false;
+    scanProgress.running = false;
+    scanProgress.phase = `完成，共 ${totalItems} 件商品`;
   }
 
-  console.log(`[Crawler] Full scan complete: ${totalItems} items across ${page - 1} pages`);
-  return { status: 'complete', totalItems, totalPages: page - 1 };
+  console.log(`[Scan] Complete: ${totalItems} items`);
+  return { status: 'complete', totalItems };
+}
+
+function stopFullScan() {
+  fullScanRunning = false;
+  scanProgress.running = false;
+  scanProgress.phase = '已停止';
 }
 
 function getScanStatus() {
-  return { running: fullScanRunning };
+  return { ...scanProgress };
 }
 
 async function crawlPortfolioItems() {
@@ -275,7 +286,8 @@ module.exports = {
   crawlPortfolioItems,
   crawlWatchlistItems,
   fullMarketScan,
+  stopFullScan,
   getScanStatus,
-  categorizeItem,
+  extractCategory,
   BUFF_FEE_RATE,
 };
