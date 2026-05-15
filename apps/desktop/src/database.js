@@ -103,17 +103,15 @@ function initDatabase() {
     CREATE INDEX IF NOT EXISTS idx_trade_logs_time ON trade_logs(created_at DESC);
   `);
 
-  // Migration: add columns if missing (for existing databases)
-  const cols = db.prepare("PRAGMA table_info(items)").all().map(c => c.name);
-  if (!cols.includes('exterior')) db.exec("ALTER TABLE items ADD COLUMN exterior TEXT");
-  if (!cols.includes('quality')) db.exec("ALTER TABLE items ADD COLUMN quality TEXT");
-  if (!cols.includes('rarity')) db.exec("ALTER TABLE items ADD COLUMN rarity TEXT");
-  if (!cols.includes('weapon')) db.exec("ALTER TABLE items ADD COLUMN weapon TEXT");
-
-  db.exec(`
-    CREATE INDEX IF NOT EXISTS idx_items_exterior ON items(exterior);
-    CREATE INDEX IF NOT EXISTS idx_items_rarity ON items(rarity);
-  `);
+  const migrations = [
+    'ALTER TABLE items ADD COLUMN exterior TEXT',
+    'ALTER TABLE items ADD COLUMN quality TEXT',
+    'ALTER TABLE items ADD COLUMN rarity TEXT',
+    'ALTER TABLE items ADD COLUMN weapon TEXT',
+  ];
+  for (const sql of migrations) {
+    try { db.exec(sql); } catch (e) { /* column already exists */ }
+  }
 
   console.log('SQLite database initialized at:', dbPath);
   return db;

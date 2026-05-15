@@ -54,20 +54,10 @@ const BUFF_CATEGORY_GROUPS = [
   { group: 'type_customplayer', label: '特工' },
 ];
 
-function extractCategory(item) {
-  const tags = item.goods_info?.info?.tags || {};
-  const typeName = tags.type?.localized_name || '';
-  const catName = tags.category?.localized_name || '';
-
-  if (typeName) return typeName;
-  if (catName) return catName;
-  return '其他';
-}
-
-function extractItemTags(item) {
+function extractTags(item) {
   const tags = item.goods_info?.info?.tags || {};
   return {
-    category: tags.type?.localized_name || '其他',
+    category: tags.type?.localized_name || tags.category?.localized_name || '其他',
     exterior: tags.exterior?.localized_name || '',
     quality: tags.quality?.localized_name || '',
     rarity: tags.rarity?.localized_name || '',
@@ -96,7 +86,7 @@ function upsertItems(items, game) {
 
   db.transaction(() => {
     for (const item of items) {
-      const t = extractItemTags(item);
+      const t = extractTags(item);
       upsert.run(
         item.id,
         item.short_name || item.name,
@@ -307,6 +297,6 @@ module.exports = {
   fullMarketScan,
   stopFullScan,
   getScanStatus,
-  extractCategory,
+  extractTags,
   BUFF_FEE_RATE,
 };
