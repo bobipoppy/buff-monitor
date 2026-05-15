@@ -754,14 +754,16 @@ async function render(){
       window._selectedItems=new Set();
       window._itemsPage=1;
       window._activeCat='';
+      window._pillStyle='padding:6px 14px;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--text-secondary);cursor:pointer;font-size:12px;white-space:nowrap;transition:all .15s';
+      window._pillActiveStyle='padding:6px 14px;border-radius:6px;border:1px solid var(--accent);background:var(--accent-glow);color:var(--accent-light);cursor:pointer;font-size:12px;white-space:nowrap;font-weight:500';
 
       document.querySelectorAll('.cat-pill').forEach(pill=>{
         pill.addEventListener('click',function(){
           document.querySelectorAll('.cat-pill').forEach(p=>{
-            p.style.cssText='${pillStyle}';
+            p.style.cssText=window._pillStyle;
             p.classList.remove('active');
           });
-          this.style.cssText='${pillActiveStyle}';
+          this.style.cssText=window._pillActiveStyle;
           this.classList.add('active');
           window._activeCat=this.dataset.cat;
           loadItems(1);
@@ -881,8 +883,8 @@ async function render(){
         loadItems(1);
         const cats2=await fetch(API+'/items/categories').then(r=>r.json());
         const pills=document.getElementById('cat-pills');
-        pills.innerHTML='<span class="cat-pill active" data-cat="" style="${pillActiveStyle}">全部</span>'+cats2.map(ct=>'<span class="cat-pill" data-cat="'+ct.category+'" style="${pillStyle}">'+ct.category+'</span>').join('');
-        document.querySelectorAll('.cat-pill').forEach(pill=>{pill.addEventListener('click',function(){document.querySelectorAll('.cat-pill').forEach(p=>{p.style.cssText='${pillStyle}';p.classList.remove('active');});this.style.cssText='${pillActiveStyle}';this.classList.add('active');window._activeCat=this.dataset.cat;loadItems(1);});});
+        pills.innerHTML='<span class="cat-pill active" data-cat="" style="'+window._pillActiveStyle+'">全部</span>'+cats2.map(ct=>'<span class="cat-pill" data-cat="'+ct.category+'" style="'+window._pillStyle+'">'+ct.category+'</span>').join('');
+        document.querySelectorAll('.cat-pill').forEach(pill=>{pill.addEventListener('click',function(){document.querySelectorAll('.cat-pill').forEach(p=>{p.style.cssText=window._pillStyle;p.classList.remove('active');});this.style.cssText=window._pillActiveStyle;this.classList.add('active');window._activeCat=this.dataset.cat;loadItems(1);});});
       };
       window.startFullScan=async function(){
         const btn=document.getElementById('scan-btn');btn.disabled=true;btn.textContent='扫描中...';
@@ -903,8 +905,8 @@ async function render(){
             loadItems(1);
             const cats2=await fetch(API+'/items/categories').then(r=>r.json());
             const pills=document.getElementById('cat-pills');
-            pills.innerHTML='<span class="cat-pill active" data-cat="" style="${pillActiveStyle}">全部</span>'+cats2.map(ct=>'<span class="cat-pill" data-cat="'+ct.category+'" style="${pillStyle}">'+ct.category+'</span>').join('');
-            document.querySelectorAll('.cat-pill').forEach(pill=>{pill.addEventListener('click',function(){document.querySelectorAll('.cat-pill').forEach(p=>{p.style.cssText='${pillStyle}';p.classList.remove('active');});this.style.cssText='${pillActiveStyle}';this.classList.add('active');window._activeCat=this.dataset.cat;loadItems(1);});});
+            pills.innerHTML='<span class="cat-pill active" data-cat="" style="'+window._pillActiveStyle+'">全部</span>'+cats2.map(ct=>'<span class="cat-pill" data-cat="'+ct.category+'" style="'+window._pillStyle+'">'+ct.category+'</span>').join('');
+            document.querySelectorAll('.cat-pill').forEach(pill=>{pill.addEventListener('click',function(){document.querySelectorAll('.cat-pill').forEach(p=>{p.style.cssText=window._pillStyle;p.classList.remove('active');});this.style.cssText=window._pillActiveStyle;this.classList.add('active');window._activeCat=this.dataset.cat;loadItems(1);});});
           }
         },3000);
       };
