@@ -99,16 +99,16 @@ function startServer() {
 
     app.get('/api/items/categories', (_req, res) => {
       const db = getDb();
-      const cats = db.prepare(`SELECT category, COUNT(*) as count FROM items WHERE category IS NOT NULL AND category != '' GROUP BY category ORDER BY count DESC`).all();
+      const cats = db.prepare(`SELECT category, COUNT(*) as count FROM items WHERE category IS NOT NULL AND category != '' AND category NOT GLOB '*[a-zA-Z]*' GROUP BY category ORDER BY count DESC`).all();
       res.json(cats);
     });
 
     app.get('/api/items/filters', (_req, res) => {
       const db = getDb();
-      const cats = db.prepare(`SELECT category, COUNT(*) as count FROM items WHERE category IS NOT NULL AND category != '' GROUP BY category ORDER BY count DESC`).all();
+      const cats = db.prepare(`SELECT category, COUNT(*) as count FROM items WHERE category IS NOT NULL AND category != '' AND category NOT GLOB '*[a-zA-Z]*' GROUP BY category ORDER BY count DESC`).all();
       const exteriors = db.prepare(`SELECT exterior, COUNT(*) as count FROM items WHERE exterior IS NOT NULL AND exterior != '' GROUP BY exterior ORDER BY count DESC`).all();
       const rarities = db.prepare(`SELECT rarity, COUNT(*) as count FROM items WHERE rarity IS NOT NULL AND rarity != '' GROUP BY rarity ORDER BY count DESC`).all();
-      const qualities = db.prepare(`SELECT quality, COUNT(*) as count FROM items WHERE quality IS NOT NULL AND quality != '' GROUP BY quality ORDER BY count DESC`).all();
+      const qualities = db.prepare(`SELECT quality, COUNT(*) as count FROM items WHERE quality IS NOT NULL AND quality != '' AND quality NOT GLOB '*normal*' GROUP BY quality ORDER BY count DESC`).all();
       const weapons = db.prepare(`SELECT weapon, COUNT(*) as count FROM items WHERE weapon IS NOT NULL AND weapon != '' GROUP BY weapon ORDER BY count DESC`).all();
       res.json({ cats, exteriors, rarities, qualities, weapons });
     });
@@ -687,50 +687,56 @@ async function render(){
         fetch(API+'/items/scan-status').then(r=>r.json()),
       ]);
       const cats=filters.cats||[];
-      const selStyle='padding:7px 10px;border:1px solid var(--border);border-radius:8px;background:var(--bg-card);color:var(--text-primary);font-size:12px;max-width:150px';
+      const pillStyle='padding:6px 14px;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--text-secondary);cursor:pointer;font-size:12px;white-space:nowrap;transition:all .15s';
+      const pillActiveStyle='padding:6px 14px;border-radius:6px;border:1px solid var(--accent);background:var(--accent-glow);color:var(--accent-light);cursor:pointer;font-size:12px;white-space:nowrap;font-weight:500';
 
       c.innerHTML=\`
-        <div class="page-title">监控列表 <span class="badge" id="items-total">加载中...</span></div>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+          <div class="page-title" style="margin:0">监控列表 <span class="badge" id="items-total">...</span></div>
+          <button id="scan-btn" onclick="startFullScan()" style="padding:7px 14px;border-radius:8px;border:none;background:var(--accent);color:#fff;cursor:pointer;font-size:12px;white-space:nowrap">\${scanSt.running?'扫描中...':'全量扫描'}</button>
+        </div>
 
-        <div id="scan-progress" style="display:\${scanSt.running?'block':'none'};margin-bottom:16px;padding:14px 18px;background:var(--bg-card);border:1px solid var(--border-active);border-radius:var(--radius);animation:pulse 2s infinite">
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
-            <span style="font-size:13px;font-weight:600;color:var(--accent-light)" id="scan-phase">\${scanSt.phase||'准备中...'}</span>
-            <button onclick="stopScan()" style="padding:4px 12px;border-radius:6px;border:1px solid var(--red);background:transparent;color:var(--red);cursor:pointer;font-size:12px">停止扫描</button>
+        <div id="scan-progress" style="display:\${scanSt.running?'block':'none'};margin-bottom:14px;padding:12px 16px;background:var(--bg-card);border:1px solid var(--border-active);border-radius:var(--radius-sm);animation:pulse 2s infinite">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+            <span style="font-size:12px;font-weight:600;color:var(--accent-light)" id="scan-phase">\${scanSt.phase||'准备中...'}</span>
+            <button onclick="stopScan()" style="padding:3px 10px;border-radius:5px;border:1px solid var(--red);background:transparent;color:var(--red);cursor:pointer;font-size:11px">停止</button>
           </div>
-          <div style="background:var(--bg-primary);border-radius:4px;height:6px;overflow:hidden">
-            <div id="scan-bar" style="height:100%;background:var(--accent);border-radius:4px;transition:width .3s;width:\${scanSt.groupsTotal?(scanSt.groupsDone/scanSt.groupsTotal*100):0}%"></div>
+          <div style="background:var(--bg-primary);border-radius:3px;height:4px;overflow:hidden">
+            <div id="scan-bar" style="height:100%;background:var(--accent);border-radius:3px;transition:width .3s;width:\${scanSt.groupsTotal?(scanSt.groupsDone/scanSt.groupsTotal*100):0}%"></div>
           </div>
-          <div style="display:flex;justify-content:space-between;margin-top:6px;font-size:12px;color:var(--text-muted)">
+          <div style="display:flex;justify-content:space-between;margin-top:5px;font-size:11px;color:var(--text-muted)">
             <span>正在扫描: <strong id="scan-group">\${scanSt.currentGroup||'...'}</strong></span>
-            <span>分类 <span id="scan-gd">\${scanSt.groupsDone||0}</span>/\${scanSt.groupsTotal||0} · 已获取 <strong id="scan-total">\${scanSt.totalItems||0}</strong> 件</span>
+            <span><span id="scan-gd">\${scanSt.groupsDone||0}</span>/\${scanSt.groupsTotal||0} 分类 · <strong id="scan-total">\${scanSt.totalItems||0}</strong> 件</span>
           </div>
         </div>
 
-        <div class="items-toolbar" style="display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap;align-items:center">
-          <input id="items-search" type="text" placeholder="搜索商品名称..." style="flex:1;min-width:160px;padding:8px 12px;border:1px solid var(--border);border-radius:8px;background:var(--bg-card);color:var(--text-primary);font-size:13px"/>
-          <select id="items-cat" style="\${selStyle}">
-            <option value="">类型 (\${cats.reduce((a,c)=>a+c.count,0)})</option>
-            \${cats.map(ct=>\`<option value="\${ct.category}">\${ct.category} (\${ct.count})</option>\`).join('')}
-          </select>
-          <select id="items-exterior" style="\${selStyle}">
-            <option value="">外观</option>
-            \${(filters.exteriors||[]).map(e=>\`<option value="\${e.exterior}">\${e.exterior} (\${e.count})</option>\`).join('')}
-          </select>
-          <select id="items-rarity" style="\${selStyle}">
-            <option value="">稀有度</option>
-            \${(filters.rarities||[]).map(r=>\`<option value="\${r.rarity}">\${r.rarity} (\${r.count})</option>\`).join('')}
-          </select>
-          <select id="items-quality" style="\${selStyle}">
-            <option value="">品质</option>
-            \${(filters.qualities||[]).map(q=>\`<option value="\${q.quality}">\${q.quality} (\${q.count})</option>\`).join('')}
-          </select>
-          <select id="items-priority" style="\${selStyle}">
-            <option value="">监控状态</option>
-            <option value="high">高优先</option>
-            <option value="normal">普通监控</option>
-            <option value="none">未监控</option>
-          </select>
-          <button id="scan-btn" onclick="startFullScan()" style="padding:8px 14px;border-radius:8px;border:none;background:var(--accent);color:#fff;cursor:pointer;font-size:12px;white-space:nowrap">\${scanSt.running?'扫描中...':'全量扫描'}</button>
+        <div style="margin-bottom:12px;padding:12px 16px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm)">
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px" id="cat-pills">
+            <span class="cat-pill active" data-cat="" style="\${pillActiveStyle}">全部</span>
+            \${cats.map(ct=>\`<span class="cat-pill" data-cat="\${ct.category}" style="\${pillStyle}">\${ct.category}</span>\`).join('')}
+          </div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+            <select id="items-exterior" style="padding:5px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg-secondary);color:var(--text-primary);font-size:12px">
+              <option value="">外观</option>
+              \${(filters.exteriors||[]).map(e=>\`<option value="\${e.exterior}">\${e.exterior}</option>\`).join('')}
+            </select>
+            <select id="items-rarity" style="padding:5px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg-secondary);color:var(--text-primary);font-size:12px">
+              <option value="">稀有度</option>
+              \${(filters.rarities||[]).map(r=>\`<option value="\${r.rarity}">\${r.rarity}</option>\`).join('')}
+            </select>
+            <select id="items-quality" style="padding:5px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg-secondary);color:var(--text-primary);font-size:12px">
+              <option value="">品质</option>
+              \${(filters.qualities||[]).map(q=>\`<option value="\${q.quality}">\${q.quality}</option>\`).join('')}
+            </select>
+            <select id="items-priority" style="padding:5px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg-secondary);color:var(--text-primary);font-size:12px">
+              <option value="">监控状态</option>
+              <option value="high">高优先</option>
+              <option value="normal">普通监控</option>
+              <option value="none">未监控</option>
+            </select>
+            <div style="flex:1"></div>
+            <input id="items-search" type="text" placeholder="搜索名称..." style="width:180px;padding:5px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg-secondary);color:var(--text-primary);font-size:12px"/>
+          </div>
         </div>
 
         <div class="batch-bar" id="batch-bar" style="display:none;padding:10px 16px;background:var(--accent);color:#fff;border-radius:8px;margin-bottom:12px;align-items:center;gap:8px;flex-wrap:wrap">
@@ -747,10 +753,24 @@ async function render(){
 
       window._selectedItems=new Set();
       window._itemsPage=1;
+      window._activeCat='';
+
+      document.querySelectorAll('.cat-pill').forEach(pill=>{
+        pill.addEventListener('click',function(){
+          document.querySelectorAll('.cat-pill').forEach(p=>{
+            p.style.cssText='${pillStyle}';
+            p.classList.remove('active');
+          });
+          this.style.cssText='${pillActiveStyle}';
+          this.classList.add('active');
+          window._activeCat=this.dataset.cat;
+          loadItems(1);
+        });
+      });
 
       async function loadItems(page=1){
         const search=document.getElementById('items-search')?.value||'';
-        const cat=document.getElementById('items-cat')?.value||'';
+        const cat=window._activeCat||'';
         const pri=document.getElementById('items-priority')?.value||'';
         const ext=document.getElementById('items-exterior')?.value||'';
         const rar=document.getElementById('items-rarity')?.value||'';
@@ -860,8 +880,9 @@ async function render(){
         document.getElementById('scan-btn').textContent='全量扫描';
         loadItems(1);
         const cats2=await fetch(API+'/items/categories').then(r=>r.json());
-        const sel=document.getElementById('items-cat');
-        sel.innerHTML='<option value="">全部分类 ('+cats2.reduce((a,c)=>a+c.count,0)+')</option>'+cats2.map(ct=>'<option value="'+ct.category+'">'+ct.category+' ('+ct.count+')</option>').join('');
+        const pills=document.getElementById('cat-pills');
+        pills.innerHTML='<span class="cat-pill active" data-cat="" style="${pillActiveStyle}">全部</span>'+cats2.map(ct=>'<span class="cat-pill" data-cat="'+ct.category+'" style="${pillStyle}">'+ct.category+'</span>').join('');
+        document.querySelectorAll('.cat-pill').forEach(pill=>{pill.addEventListener('click',function(){document.querySelectorAll('.cat-pill').forEach(p=>{p.style.cssText='${pillStyle}';p.classList.remove('active');});this.style.cssText='${pillActiveStyle}';this.classList.add('active');window._activeCat=this.dataset.cat;loadItems(1);});});
       };
       window.startFullScan=async function(){
         const btn=document.getElementById('scan-btn');btn.disabled=true;btn.textContent='扫描中...';
@@ -881,16 +902,17 @@ async function render(){
             document.getElementById('scan-progress').style.display='none';
             loadItems(1);
             const cats2=await fetch(API+'/items/categories').then(r=>r.json());
-            const sel=document.getElementById('items-cat');
-            sel.innerHTML='<option value="">全部分类 ('+cats2.reduce((a,c)=>a+c.count,0)+')</option>'+cats2.map(ct=>'<option value="'+ct.category+'">'+ct.category+' ('+ct.count+')</option>').join('');
+            const pills=document.getElementById('cat-pills');
+            pills.innerHTML='<span class="cat-pill active" data-cat="" style="${pillActiveStyle}">全部</span>'+cats2.map(ct=>'<span class="cat-pill" data-cat="'+ct.category+'" style="${pillStyle}">'+ct.category+'</span>').join('');
+            document.querySelectorAll('.cat-pill').forEach(pill=>{pill.addEventListener('click',function(){document.querySelectorAll('.cat-pill').forEach(p=>{p.style.cssText='${pillStyle}';p.classList.remove('active');});this.style.cssText='${pillActiveStyle}';this.classList.add('active');window._activeCat=this.dataset.cat;loadItems(1);});});
           }
         },3000);
       };
 
       let debounceTimer;
       document.getElementById('items-search').addEventListener('input',()=>{clearTimeout(debounceTimer);debounceTimer=setTimeout(()=>loadItems(1),400);});
-      ['items-cat','items-exterior','items-rarity','items-quality','items-priority'].forEach(id=>{
-        document.getElementById(id).addEventListener('change',()=>loadItems(1));
+      ['items-exterior','items-rarity','items-quality','items-priority'].forEach(id=>{
+        document.getElementById(id)?.addEventListener('change',()=>loadItems(1));
       });
       loadItems(1);
     }
