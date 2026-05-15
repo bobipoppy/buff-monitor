@@ -32,7 +32,11 @@ if [ -n "$SQLITE_SRC" ]; then
   echo "  Copied better-sqlite3 native binary"
 fi
 
-# 5. 重新生成 DMG
+# 5. Ad-hoc 签名（避免 macOS Gatekeeper Invalid Signature 崩溃）
+echo "[5/5] Code signing..."
+codesign --force --deep --sign - "dist/mac-arm64/BUFF Monitor.app"
+
+# 6. 重新生成 DMG
 echo "=== Regenerating DMG... ==="
 VERSION=$(node -p "require('./package.json').version")
 DMG_PATH="dist/BUFF Monitor-${VERSION}-arm64.dmg"

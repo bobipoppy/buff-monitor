@@ -64,29 +64,48 @@ function extractCategory(item) {
   return '其他';
 }
 
+function extractItemTags(item) {
+  const tags = item.goods_info?.info?.tags || {};
+  return {
+    category: tags.type?.localized_name || '其他',
+    exterior: tags.exterior?.localized_name || '',
+    quality: tags.quality?.localized_name || '',
+    rarity: tags.rarity?.localized_name || '',
+    weapon: tags.weapon?.localized_name || '',
+  };
+}
+
 function upsertItems(items, game) {
   const db = getDb();
   const upsert = db.prepare(`
-    INSERT INTO items (goods_id, name, game, category, image_url, steam_price, buff_min_price, sell_count)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO items (goods_id, name, game, category, exterior, quality, rarity, weapon, image_url, steam_price, buff_min_price, sell_count)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT (goods_id) DO UPDATE SET
       name = excluded.name,
       buff_min_price = excluded.buff_min_price,
       sell_count = excluded.sell_count,
       steam_price = excluded.steam_price,
       category = excluded.category,
+      exterior = excluded.exterior,
+      quality = excluded.quality,
+      rarity = excluded.rarity,
+      weapon = excluded.weapon,
       image_url = COALESCE(excluded.image_url, items.image_url),
       updated_at = datetime('now')
   `);
 
   db.transaction(() => {
     for (const item of items) {
-      const category = extractCategory(item);
+      const t = extractItemTags(item);
       upsert.run(
         item.id,
         item.short_name || item.name,
         game,
-        category,
+        t.category,
+        t.exterior,
+        t.quality,
+        t.rarity,
+        t.weapon,
         item.goods_info?.icon_url || '',
         parseFloat(item.goods_info?.steam_price_cny) || null,
         parseFloat(item.sell_min_price),

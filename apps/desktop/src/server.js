@@ -50,12 +50,14 @@ function startServer() {
     app.get('/api/items', (req, res) => {
       try {
         const db = getDb();
-        const { search, game, category, priority, page = '1', limit = '50' } = req.query;
+        const { search, game, category, exterior, rarity, priority, page = '1', limit = '50' } = req.query;
         const offset = (parseInt(page) - 1) * parseInt(limit);
         let sql = `SELECT * FROM items WHERE 1=1`;
         const params = [];
         if (game) { sql += ` AND game = ?`; params.push(game); }
         if (category) { sql += ` AND category = ?`; params.push(category); }
+        if (exterior) { sql += ` AND exterior = ?`; params.push(exterior); }
+        if (rarity) { sql += ` AND rarity = ?`; params.push(rarity); }
         if (priority) { sql += ` AND watch_priority = ?`; params.push(priority); }
         if (search) { sql += ` AND name LIKE ?`; params.push(`%${search}%`); }
 
@@ -694,6 +696,25 @@ async function render(){
             <option value="">全部分类 (\${cats.reduce((a,c)=>a+c.count,0)})</option>
             \${cats.map(ct=>\`<option value="\${ct.category}">\${ct.category} (\${ct.count})</option>\`).join('')}
           </select>
+          <select id="items-exterior" style="padding:8px 12px;border:1px solid var(--border);border-radius:8px;background:var(--bg-card);color:var(--text-primary);font-size:13px">
+            <option value="">全部品质</option>
+            <option value="崭新出厂">崭新出厂</option>
+            <option value="略有磨损">略有磨损</option>
+            <option value="久经沙场">久经沙场</option>
+            <option value="破损不堪">破损不堪</option>
+            <option value="战痕累累">战痕累累</option>
+          </select>
+          <select id="items-rarity" style="padding:8px 12px;border:1px solid var(--border);border-radius:8px;background:var(--bg-card);color:var(--text-primary);font-size:13px">
+            <option value="">全部稀有度</option>
+            <option value="隐秘">隐秘</option>
+            <option value="保密">保密</option>
+            <option value="受限">受限</option>
+            <option value="非凡">非凡</option>
+            <option value="卓越">卓越</option>
+            <option value="奇异">奇异</option>
+            <option value="军规级">军规级</option>
+            <option value="工业级">工业级</option>
+          </select>
           <select id="items-priority" style="padding:8px 12px;border:1px solid var(--border);border-radius:8px;background:var(--bg-card);color:var(--text-primary);font-size:13px">
             <option value="">全部状态</option>
             <option value="high">高优先监控</option>
@@ -721,10 +742,14 @@ async function render(){
       async function loadItems(page=1){
         const search=document.getElementById('items-search')?.value||'';
         const cat=document.getElementById('items-cat')?.value||'';
+        const ext=document.getElementById('items-exterior')?.value||'';
+        const rar=document.getElementById('items-rarity')?.value||'';
         const pri=document.getElementById('items-priority')?.value||'';
         let url=API+'/items?page='+page+'&limit=50';
         if(search)url+='&search='+encodeURIComponent(search);
         if(cat)url+='&category='+encodeURIComponent(cat);
+        if(ext)url+='&exterior='+encodeURIComponent(ext);
+        if(rar)url+='&rarity='+encodeURIComponent(rar);
         if(pri)url+='&priority='+pri;
         const r=await fetch(url).then(r=>r.json());
         window._itemsPage=page;
@@ -733,16 +758,24 @@ async function render(){
         if(!r.items.length){
           list.innerHTML='<div class="panel-empty" style="padding:40px;text-align:center;color:var(--text-muted)"><div>暂无商品</div><div style="margin-top:8px;font-size:13px">点击「全量扫描」获取 BUFF 全部 CS2 商品</div></div>';
         } else {
+          const rarityColors={'隐秘':'#eb4b4b','非凡':'#d32ce6','卓越':'#8847ff','奇异':'#4b69ff','工业级':'#5e98d9','消费级':'#b0c3d9','军规级':'#4b69ff','受限':'#8847ff','保密':'#d32ce6'};
           list.innerHTML=\`<div style="display:flex;align-items:center;padding:6px 12px;border-bottom:1px solid var(--border);font-size:12px;color:var(--text-muted)">
             <label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" id="select-all" onchange="toggleSelectAll(this.checked)" style="width:16px;height:16px;cursor:pointer"/> 全选本页</label>
             <span style="margin-left:auto">第 \${page} 页 · 显示 \${r.items.length}/\${r.total}</span>
           </div>\`+r.items.map(i=>{
             const priLabel=i.watch_priority==='high'?'<span style="color:var(--red);font-weight:600">●</span> 高优先':i.watch_priority==='normal'?'<span style="color:var(--accent);font-weight:600">●</span> 监控中':'<span style="color:var(--text-muted)">○</span> 未监控';
+            const rarityColor=rarityColors[i.rarity]||'var(--text-muted)';
+            const exteriorBadge=i.exterior?\`<span style="display:inline-block;padding:1px 6px;border-radius:4px;font-size:11px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1)">\${i.exterior}</span>\`:'';
+            const qualityBadge=i.quality&&i.quality!=='普通'?\`<span style="color:#fbbf24;font-size:11px;font-weight:600">\${i.quality}</span>\`:'';
+            const rarityBadge=i.rarity?\`<span style="color:\${rarityColor};font-size:11px;font-weight:500">\${i.rarity}</span>\`:'';
+            const weaponLabel=i.weapon?\`<span style="color:var(--text-secondary);font-size:11px">\${i.weapon}</span>\`:'';
+            const tags=[qualityBadge,rarityBadge,exteriorBadge,weaponLabel].filter(Boolean).join(' ');
             return \`<div class="list-item" style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-bottom:1px solid var(--border);transition:background .15s" onmouseenter="this.style.background='var(--bg-card-hover)'" onmouseleave="this.style.background='transparent'">
               <input type="checkbox" class="item-cb" data-id="\${i.id}" onchange="onItemCheck()" style="width:16px;height:16px;cursor:pointer;flex-shrink:0" \${window._selectedItems.has(i.id)?'checked':''}/>
               <div style="flex:1;min-width:0">
                 <div style="font-size:14px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">\${i.name}</div>
-                <div style="font-size:12px;color:var(--text-muted);margin-top:2px">\${priLabel} · \${i.category||'未分类'} · 在售 \${i.sell_count||0}</div>
+                <div style="font-size:12px;margin-top:3px;display:flex;align-items:center;gap:6px;flex-wrap:wrap">\${tags}</div>
+                <div style="font-size:11px;color:var(--text-muted);margin-top:2px">\${priLabel} · \${i.category||'未分类'} · 在售 \${i.sell_count||0}</div>
               </div>
               <div style="text-align:right;flex-shrink:0">
                 <div style="font-size:15px;font-weight:600">¥\${i.buff_min_price||'--'}</div>
@@ -841,6 +874,8 @@ async function render(){
       let debounceTimer;
       document.getElementById('items-search').addEventListener('input',()=>{clearTimeout(debounceTimer);debounceTimer=setTimeout(()=>loadItems(1),400);});
       document.getElementById('items-cat').addEventListener('change',()=>loadItems(1));
+      document.getElementById('items-exterior').addEventListener('change',()=>loadItems(1));
+      document.getElementById('items-rarity').addEventListener('change',()=>loadItems(1));
       document.getElementById('items-priority').addEventListener('change',()=>loadItems(1));
       loadItems(1);
     }

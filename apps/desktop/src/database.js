@@ -23,6 +23,10 @@ function initDatabase() {
       name TEXT NOT NULL,
       game TEXT NOT NULL DEFAULT 'csgo',
       category TEXT,
+      exterior TEXT,
+      quality TEXT,
+      rarity TEXT,
+      weapon TEXT,
       image_url TEXT,
       steam_price REAL,
       buff_min_price REAL NOT NULL DEFAULT 0,
@@ -97,6 +101,18 @@ function initDatabase() {
     CREATE INDEX IF NOT EXISTS idx_items_priority ON items(watch_priority);
     CREATE INDEX IF NOT EXISTS idx_alert_logs_triggered ON alert_logs(triggered_at DESC);
     CREATE INDEX IF NOT EXISTS idx_trade_logs_time ON trade_logs(created_at DESC);
+  `);
+
+  // Migration: add columns if missing (for existing databases)
+  const cols = db.prepare("PRAGMA table_info(items)").all().map(c => c.name);
+  if (!cols.includes('exterior')) db.exec("ALTER TABLE items ADD COLUMN exterior TEXT");
+  if (!cols.includes('quality')) db.exec("ALTER TABLE items ADD COLUMN quality TEXT");
+  if (!cols.includes('rarity')) db.exec("ALTER TABLE items ADD COLUMN rarity TEXT");
+  if (!cols.includes('weapon')) db.exec("ALTER TABLE items ADD COLUMN weapon TEXT");
+
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_items_exterior ON items(exterior);
+    CREATE INDEX IF NOT EXISTS idx_items_rarity ON items(rarity);
   `);
 
   console.log('SQLite database initialized at:', dbPath);
